@@ -1,0 +1,24 @@
+# Gradle
+.gradle/
+build/
+local.properties
+# The wrapper JAR is a binary fetched on demand by
+# scripts/ensure-gradle-wrapper.js (and the CI bootstrap); the properties file
+# stays in git as the single source of truth for the pinned Gradle version.
+gradle/*
+!gradle/wrapper/
+gradle/wrapper/*
+!gradle/wrapper/gradle-wrapper.properties
+
+# IDE
+.idea/
+*.iml
+captures/
+
+# Generated
+app/release/
+app/build/
+app/src/main/assets/bds/
+
+*.apk
+*.aab

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext HTTP is permitted for loopback only.
+
+  The DeepSeek-Harness bridge (HarnessClient.kt) talks to the local
+  harness ApiProxy at http://127.0.0.1:3080 — the same loopback endpoint
+  the extension's background service worker used. Every other host keeps
+  the app-wide cleartext ban (usesCleartextTraffic="false"): this config
+  only whitelists the two loopback names for plain HTTP.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+</network-security-config>
