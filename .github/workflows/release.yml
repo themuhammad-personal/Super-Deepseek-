@@ -1,0 +1,145 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      ANDROID_HOME: ${{ github.workspace }}/.android-sdk
+      ANDROID_SDK_ROOT: ${{ github.workspace }}/.android-sdk
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle*
+            android/**/gradle-wrapper.properties
+
+      - name: Cache Android SDK
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.android-sdk
+          key: ${{ runner.os }}-android-sdk-34-build-tools-34.0.0-v1
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools platforms;android-34 build-tools;34.0.0
+
+      - name: Write Android local.properties
+        run: printf 'sdk.dir=%s\n' "$ANDROID_HOME" > android/local.properties
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Android web bundle
+        run: npm run build:android
+
+      - name: Verify staged assets
+        run: |
+          for f in content.js content.css injected.js sandbox.js sandbox.html static/loading/1.svg; do
+            test -f "android/app/src/main/assets/bds/$f" || { echo "missing asset: $f"; exit 1; }
+          done
+          echo "assets OK"
+
+      - name: Ensure Gradle wrapper files exist
+        run: node scripts/ensure-gradle-wrapper.js
+
+      - name: Make Gradle wrapper executable
+        working-directory: android
+        run: chmod +x ./gradlew
+
+      - name: Decode Keystore
+        env:
+          BDS_KEYSTORE: ${{ secrets.BDS_KEYSTORE }}
+        run: |
+          if [ -n "$BDS_KEYSTORE" ]; then
+            echo "$BDS_KEYSTORE" | base64 --decode > android/ci-release.jks
+          else
+            echo "Warning: BDS_KEYSTORE secret is missing. Release build might fail or be unsigned."
+          fi
+
+      - name: Build Android APK
+        working-directory: android
+        run: ./gradlew --no-daemon assembleRelease -PbdsBuildId=${{ github.run_number }}
+        env:
+          BDS_KEYSTORE_PASSWORD: ${{ secrets.BDS_KEYSTORE_PASSWORD }}
+          BDS_KEY_ALIAS: ${{ secrets.BDS_KEY_ALIAS }}
+          BDS_KEY_PASSWORD: ${{ secrets.BDS_KEY_PASSWORD }}
+
+      - name: Verify APK Signature
+        run: |
+          APK_PATH=$(find android/app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          if [ -n "$APK_PATH" ]; then
+            $ANDROID_HOME/build-tools/34.0.0/apksigner verify --verbose "$APK_PATH"
+          else
+            echo "No release APK found to verify."
+            exit 1
+          fi
+
+      - name: Compute version and prepare artifact names
+        id: prep
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          APK_SRC=$(find android/app/build/outputs/apk/release -name "*.apk" | head -n 1)
+
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            cp "$APK_SRC" better-deepseek-android-latest-signed.apk
+            echo "is_tag=false" >> "$GITHUB_OUTPUT"
+          else
+            cp "$APK_SRC" "better-deepseek-android-v${VERSION}-signed.apk"
+            echo "is_tag=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update Latest Release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest Build
+          body: |
+            This release contains the latest automated build from the `main` branch.
+
+            The Android APK is **digitally signed** — install it directly (you may
+            still need to allow "Install unknown apps" for the source you install from).
+          files: |
+            better-deepseek-android-latest-signed.apk
+          prerelease: true
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Versioned Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          body: |
+            Signed Android APK for version ${{ steps.prep.outputs.version }}.
+          files: |
+            better-deepseek-android-v${{ steps.prep.outputs.version }}-signed.apk
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
