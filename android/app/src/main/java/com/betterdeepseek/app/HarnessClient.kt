@@ -242,7 +242,8 @@ internal class HarnessClient(private val httpClient: OkHttpClient) {
                                         .put("requestPayload", promptReqBody),
                         )
             }
-            val (pStatus, pText) = promptResult!!
+            // Smart-cast to non-null by the guard above.
+            val (pStatus, pText) = promptResult
             if (pStatus < 200 || pStatus >= 300) {
                 return JSONObject()
                         .put("ok", false)

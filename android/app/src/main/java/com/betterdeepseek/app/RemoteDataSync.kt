@@ -281,8 +281,11 @@ internal class RemoteDataSync(
             if (!aIsObject || !bIsObject) return false
             val left = a as JSONObject
             val right = b as JSONObject
-            val aKeys = left.keys().asSequence().sorted()
-            val bKeys = right.keys().asSequence().sorted()
+            // toList() matters: Sequence.sorted() returns another lazy Sequence, and
+            // Sequence does not implement value equality, so `aKeys != bKeys` would
+            // compare references and always report a difference.
+            val aKeys = left.keys().asSequence().sorted().toList()
+            val bKeys = right.keys().asSequence().sorted().toList()
             if (aKeys != bKeys) return false
             for (key in aKeys) {
                 if (!deepEqualJson(left.opt(key), right.opt(key))) return false
