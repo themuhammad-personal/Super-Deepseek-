@@ -1,8 +1,9 @@
 name: Kotlin compile check
 
 # TEMPORARY (verification helper, delete before merge): compiles the Android
-# Kotlin sources without the full CI suite so compile errors surface in ~2 min
-# instead of ~4, and can be read as check-run annotations.
+# Kotlin sources and runs one focused JVM test class, so compile/test feedback
+# arrives in ~2-3 min instead of ~5 min and can be read as check-run
+# annotations (the raw job log lives on a blocked blob-storage host).
 on:
   push:
     branches:
@@ -10,7 +11,7 @@ on:
 
 jobs:
   compile:
-    name: Compile Kotlin
+    name: Compile + focused tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -50,13 +51,20 @@ jobs:
         working-directory: android
         run: chmod +x ./gradlew
 
-      - name: Compile main and unit test Kotlin
+      - name: Compile and run focused tests
         working-directory: android
+        env:
+          # Empty -> only compile main + unit-test sources.
+          FOCUS: "com.betterdeepseek.app.RemoteDataSyncTest"
         run: |
           set -o pipefail
-          ./gradlew --no-daemon compileDebugKotlin compileDebugUnitTestKotlin 2>&1 | tee /tmp/kotlin-compile.log
+          if [ -n "$FOCUS" ]; then
+            ./gradlew --no-daemon testDebugUnitTest --tests "$FOCUS" 2>&1 | tee /tmp/kotlin-compile.log
+          else
+            ./gradlew --no-daemon compileDebugKotlin compileDebugUnitTestKotlin 2>&1 | tee /tmp/kotlin-compile.log
+          fi
 
-      - name: Surface compile errors
+      - name: Surface compile errors and failures
         if: always()
         working-directory: android
         run: |
@@ -73,3 +81,19 @@ jobs:
             grep -nE '^(FAILURE:|Caused by:)|What went wrong|Execution failed for task' "$log" \
               | head -n 10 | annotate
           fi
+          python3 - <<'PY'
+          import glob, xml.etree.ElementTree as ET
+          for path in sorted(glob.glob('app/build/test-results/**/*.xml', recursive=True)):
+              try:
+                  root = ET.parse(path).getroot()
+              except Exception:
+                  continue
+              for case in root.iter('testcase'):
+                  for failure in list(case.findall('failure')) + list(case.findall('error')):
+                      msg = (failure.get('message') or '').strip()
+                      text = (failure.text or '').strip()
+                      trace = ' | '.join(line.strip() for line in text.splitlines()
+                                         if 'betterdeepseek' in line or 'AssertionError' in line)
+                      detail = (msg + (' <- ' + trace if trace else '')).strip()
+                      print(f"::error::{case.get('classname')}.{case.get('name')}: {detail[:900]}")
+          PY

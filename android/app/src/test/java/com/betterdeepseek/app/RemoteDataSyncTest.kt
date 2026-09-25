@@ -147,18 +147,38 @@ class RemoteDataSyncTest {
     fun `zz debug updateLanguages diff keys`() {
         enqueueAllLocales()
         sync.updateLanguages(1_700_000_000_000L)
-        val beforeLocales = prefs.getString("bds_locale_updates", null)
-        val beforeChecked = prefs.getString("bds_locale_update_last_checked", null)
+
+        val storedMethod = RemoteDataSync::class.java.getDeclaredMethod("storedValue", String::class.java)
+        storedMethod.isAccessible = true
+        val stored = storedMethod.invoke(sync, "bds_locale_updates")
+
+        val deepMethod = RemoteDataSync::class.java.getDeclaredMethod(
+            "deepEqualJson",
+            Any::class.java,
+            Any::class.java,
+        )
+        deepMethod.isAccessible = true
+        val raw = prefs.getString("bds_locale_updates", null) ?: "null"
+        val sameText = try {
+            deepMethod.invoke(sync, JSONObject(raw), JSONObject(raw))
+        } catch (e: Exception) {
+            "ERR:${e.cause?.message ?: e.message}"
+        }
+        val sameObject = try {
+            deepMethod.invoke(sync, stored, stored)
+        } catch (e: Exception) {
+            "ERR:${e.cause?.message ?: e.message}"
+        }
 
         enqueueAllLocales()
         val second = sync.updateLanguages(1_700_000_000_000L)
 
         throw AssertionError(
             "written=" + second.getJSONArray("writtenKeys") +
-                " | checked=" + beforeChecked +
-                " | afterChecked=" + prefs.getString("bds_locale_update_last_checked", null) +
-                " | locales=" + beforeLocales +
-                " | afterLocales=" + prefs.getString("bds_locale_updates", null),
+                " | storedClass=" + stored?.javaClass?.simpleName +
+                " | sameText=" + sameText +
+                " | sameObject=" + sameObject +
+                " | rawLen=" + raw.length,
         )
     }
 
