@@ -15,7 +15,7 @@ import org.junit.Test
 import org.mockito.ArgumentMatchers.any
 import org.mockito.ArgumentMatchers.anyInt
 import org.mockito.Mockito.mock
-import org.mockito.Mockito.when
+import org.mockito.Mockito.`when`
 import java.util.concurrent.TimeUnit
 
 /**
@@ -38,7 +38,7 @@ class WebViewBridgeDispatchTest {
         server.start()
         context = mock(Context::class.java)
         prefs = InMemorySharedPreferences()
-        when(context.getSharedPreferences(any(), anyInt())).thenReturn(prefs)
+        `when`(context.getSharedPreferences(any(), anyInt())).thenReturn(prefs)
 
         val httpClient = OkHttpClient.Builder()
             .connectTimeout(2, TimeUnit.SECONDS)

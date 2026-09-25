@@ -82,7 +82,7 @@ class YouTubeTranscriptTest {
     }
 
     @Test
-    fun `fetchTranscript extracts id from watch embed and youtu.be urls`() {
+    fun `fetchTranscript extracts id from watch embed and short link urls`() {
         for (url in listOf(
             "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
             "https://www.youtube.com/embed/dQw4w9WgXcQ",
