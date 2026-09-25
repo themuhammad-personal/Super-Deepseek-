@@ -226,7 +226,9 @@ internal class McpClient(private val httpClient: OkHttpClient) {
 
         response.use { resp ->
             if (!resp.isSuccessful) {
-                val detail = resp.body?.string()?.orEmpty().take(300)
+                // `?.orEmpty()` would keep the result nullable (the safe call wraps the
+                // non-null type), so `take` has to be called on a definitely non-null value.
+                val detail = resp.body?.string().orEmpty().take(300)
                 throw McpException(
                         "MCP server returned ${resp.code}${if (detail.isNotEmpty()) ": $detail" else ""}",
                         resp.code,

@@ -228,11 +228,13 @@ internal class WebViewBridge(
      * handlers. Injectable in tests; defaults are built against the bridge's
      * own prefs/client.
      */
-    private val remoteDataSync: RemoteDataSync = remoteDataSync ?: RemoteDataSync(prefs, httpClient)
-    private val mcpClient: McpClient = mcpClient ?: McpClient(httpClient)
-    private val harnessClient: HarnessClient = harnessClient ?: HarnessClient(httpClient)
-    private val youtubeTranscript: YouTubeTranscript = youtubeTranscript ?: YouTubeTranscript(httpClient)
-    private val apiProxy: ApiProxyClient = apiProxy ?: ApiProxyClient(httpClient)
+    // `this.httpClient` is the resolved (non-null) property above; the bare name
+    // would still resolve to the nullable constructor parameter here.
+    private val remoteDataSync: RemoteDataSync = remoteDataSync ?: RemoteDataSync(prefs, this.httpClient)
+    private val mcpClient: McpClient = mcpClient ?: McpClient(this.httpClient)
+    private val harnessClient: HarnessClient = harnessClient ?: HarnessClient(this.httpClient)
+    private val youtubeTranscript: YouTubeTranscript = youtubeTranscript ?: YouTubeTranscript(this.httpClient)
+    private val apiProxy: ApiProxyClient = apiProxy ?: ApiProxyClient(this.httpClient)
 
     /** Set by MainActivity to react to page theme changes without leaking the Activity window. */
     @Volatile var onThemeChanged: ((isDark: Boolean) -> Unit)? = null

@@ -16,7 +16,7 @@ import java.util.Locale
  *
  * Ported from `src/lib/remote-persistence.js` + `src/background/index.js`:
  *
- * - [updateLanguages] fetches every shipped locale (`src/locales/*.json`) from
+ * - [updateLanguages] fetches every shipped locale JSON (`src/locales`) from
  *   the published repo, keeps only valid `{ ..., messages: {...} }` roots,
  *   merges them into the `bds_locale_updates` store (preserving stored values
  *   for codes that failed this round) and stamps `bds_locale_update_last_checked`.
@@ -52,7 +52,7 @@ internal class RemoteDataSync(
         const val DEFAULT_REMOTE_STATUS_URL =
                 "https://raw.githubusercontent.com/EdgeTypE/better-deepseek/main/extension/status.json"
 
-        /** Mirrors the `src/locales/*.json` files bundled with the app. */
+        /** Mirrors the locale JSON files under `src/locales` bundled with the app. */
         val LOCALE_CODES = listOf("en", "fa", "ru", "tr", "zh-cn")
 
         private const val KEY_LOCALES = "bds_locale_updates"
