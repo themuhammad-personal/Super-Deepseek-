@@ -1,2 +1,0 @@
-# Super-Deepseek-
-Artificial intelligent
