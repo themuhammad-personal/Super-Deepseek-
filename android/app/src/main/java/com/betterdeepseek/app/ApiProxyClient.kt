@@ -106,7 +106,14 @@ internal class ApiProxyClient(
         when (method) {
             "GET" -> builder.get()
             "HEAD" -> builder.head()
-            else -> builder.method(method, (body ?: "{}").toRequestBody(JSON_MEDIA_TYPE))
+            else ->
+                    builder.method(
+                            method,
+                            // Built from bytes on purpose: OkHttp appends
+                            // "; charset=utf-8" to a *String* body's media type, while the
+                            // JS sibling sends exactly "application/json".
+                            (body ?: "{}").toByteArray(Charsets.UTF_8).toRequestBody(JSON_MEDIA_TYPE),
+                    )
         }
 
         val startedAt = System.nanoTime()

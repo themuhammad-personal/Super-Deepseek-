@@ -84,7 +84,8 @@ class McpClientTest {
         assertEquals("tools/list", JSONObject(listReq.body.readUtf8()).getString("method"))
         assertEquals("sess-1", listReq.getHeader("Mcp-Session-Id"))
 
-        assertEquals(tools, result)
+        // org.json.JSONObject has no value equality; compare the serialised form.
+        assertEquals(tools.toString(), result.toString())
     }
 
     @Test

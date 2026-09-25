@@ -338,6 +338,9 @@ internal class HarnessClient(private val httpClient: OkHttpClient) {
 
     private fun isAbsolute(p: String): Boolean {
         if (p.isEmpty()) return false
-        return p.startsWith("/") || p.startsWith("\\") || WINDOWS_DRIVE_PATTERN.matches(p)
+        // `containsMatchIn` is the equivalent of the JS `.test()` (a prefix test):
+        // `matches` would require the whole path to match the pattern and reject
+        // every real path such as "A:/Users/Edige/GitHub/asistan".
+        return p.startsWith("/") || p.startsWith("\\") || WINDOWS_DRIVE_PATTERN.containsMatchIn(p)
     }
 }

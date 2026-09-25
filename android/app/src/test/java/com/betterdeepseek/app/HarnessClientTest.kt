@@ -137,7 +137,7 @@ class HarnessClientTest {
                 MockResponse().setBody("""{"result":{"ok":true,"value":{"sessionId":"s"}}}"""),
             )
             val result = harness.executeTask(
-                JSONObject().put("baseUrl", base()).put("cwd", cwd),
+                JSONObject().put("baseUrl", base()).put("cwd", cwd).put("prompt", "do it"),
             )
             assertTrue("cwd should be accepted: $cwd", result.getBoolean("ok"))
         }
@@ -223,7 +223,8 @@ class HarnessClientTest {
         val result = harness.executeTask(
             JSONObject()
                 .put("baseUrl", base())
-                .put("cwd", "A:/missing"),
+                .put("cwd", "A:/missing")
+                .put("prompt", "do it"),
         )
 
         assertFalse(result.getBoolean("ok"))
@@ -239,7 +240,8 @@ class HarnessClientTest {
         val result = harness.executeTask(
             JSONObject()
                 .put("baseUrl", base())
-                .put("cwd", "A:/x"),
+                .put("cwd", "A:/x")
+                .put("prompt", "do it"),
         )
 
         assertFalse(result.getBoolean("ok"))
@@ -252,7 +254,8 @@ class HarnessClientTest {
         val result = harness.executeTask(
             JSONObject()
                 .put("baseUrl", "http://127.0.0.1:1")
-                .put("cwd", "A:/x"),
+                .put("cwd", "A:/x")
+                .put("prompt", "do it"),
         )
 
         assertFalse(result.getBoolean("ok"))
