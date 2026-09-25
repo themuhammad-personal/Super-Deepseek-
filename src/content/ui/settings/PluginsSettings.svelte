@@ -313,16 +313,16 @@
       </div>
       <div class="bds-modal-body">
         <div class="bds-field">
-          <label class="bds-label">{t('mcp.nameLabel')}</label>
-          <input type="text" class="bds-input" bind:value={mcpEditorName} placeholder={t('mcp.namePlaceholder')} />
+          <label class="bds-label" for="bds-mcp-editor-name">{t('mcp.nameLabel')}</label>
+          <input id="bds-mcp-editor-name" type="text" class="bds-input" bind:value={mcpEditorName} placeholder={t('mcp.namePlaceholder')} />
         </div>
         <div class="bds-field">
-          <label class="bds-label">{t('mcp.serverUrlLabel')}</label>
-          <input type="url" class="bds-input" bind:value={mcpEditorUrl} placeholder={t('mcp.serverUrlPlaceholder')} />
+          <label class="bds-label" for="bds-mcp-editor-url">{t('mcp.serverUrlLabel')}</label>
+          <input id="bds-mcp-editor-url" type="url" class="bds-input" bind:value={mcpEditorUrl} placeholder={t('mcp.serverUrlPlaceholder')} />
         </div>
         <div class="bds-field">
-          <label class="bds-label">{t('mcp.apiKeyLabel')}</label>
-          <input type="password" class="bds-input" bind:value={mcpEditorApiKey} placeholder={t('mcp.apiKeyPlaceholder')} />
+          <label class="bds-label" for="bds-mcp-editor-key">{t('mcp.apiKeyLabel')}</label>
+          <input id="bds-mcp-editor-key" type="password" class="bds-input" bind:value={mcpEditorApiKey} placeholder={t('mcp.apiKeyPlaceholder')} />
         </div>
         <div class="bds-toggle-row" style="padding: 0;">
           <span class="bds-toggle-label">{t('mcp.enabledLabel')}</span>
