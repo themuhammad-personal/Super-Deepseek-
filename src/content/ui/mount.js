@@ -12,6 +12,9 @@ import state from "../state.js";
  * @property {(message: string) => void} showToast
  * @property {(message: string) => Promise<boolean>} showConfirm
  * @property {() => void} refreshSettings
+ * @property {(section?: string) => void} openDrawer
+ * @property {(section: string) => Promise<void>} openDrawerSection
+ * @property {(section: string) => void} scrollToSection
  * @property {() => void} refreshSkills
  * @property {() => void} refreshMemories
  * @property {() => void} refreshProjects
@@ -53,6 +56,9 @@ export function mountUi() {
     refreshWhatsNew: () => app.refreshWhatsNew(),
     refreshSavedItems: () => app.refreshSavedItems(),
     refreshCssSnippets: () => app.refreshCssSnippets(),
+    openDrawer: () => app.openDrawer(),
+    openDrawerSection: (section) => app.openDrawerSection(section),
+    scrollToSection: (section) => app.scrollToSection(section),
     showPreviewPanel: (title, content) => app.showPreviewPanel(title, content),
     hidePreviewPanel: () => app.hidePreviewPanel(),
     showLongWorkOverlay: (visible) => app.showLongWorkOverlay(visible),

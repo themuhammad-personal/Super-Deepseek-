@@ -1,4 +1,5 @@
 <script>
+  import { tick } from "svelte";
   import Drawer from "./Drawer.svelte";
   import ToastStack from "./ToastStack.svelte";
   import QuestionPanel from "./QuestionPanel.svelte";
@@ -103,18 +104,32 @@
     previewContent = "";
   }
 
-  async function toggleDrawer() {
-    if (drawerOpen) {
-      if (drawerRef && drawerRef.handleClose) {
-        await drawerRef.handleClose();
-      } else {
-        drawerOpen = false;
-      }
-    } else {
-      drawerOpen = true;
+  /**
+   * Opens the BDS drawer. The floating top trigger was removed (BDS-UI F.4) —
+   * the drawer is reached from the sidebar account menu, which calls
+   * `openDrawerSection` below through the ui API.
+   */
+  export function openDrawer() {
+    drawerOpen = true;
+  }
+
+  /** Opens the drawer and jumps to a named section (BDS-UI F.4 / F.5). */
+  export async function openDrawerSection(section) {
+    drawerOpen = true;
+    await tick();
+    if (drawerRef && drawerRef.openDrawerSection) {
+      await drawerRef.openDrawerSection(section);
     }
   }
 
+  /** Forwards a section scroll to the drawer (BDS-UI scrollToSection API). */
+  export function scrollToSection(section) {
+    if (drawerRef && drawerRef.scrollToSection) {
+      drawerRef.scrollToSection(section);
+    }
+  }
+
+  /** Called by the drawer once it decided it may close (unsaved checks ran there). */
   function closeDrawer() {
     drawerOpen = false;
   }
@@ -130,7 +145,7 @@
   // Handle external selection mode toggle
   window.addEventListener("bds:toggleSelectionMode", () => {
     appState.selectionMode = true;
-    closeDrawer();
+    drawerOpen = false;
   });
 
   window.addEventListener("bds:open-deep-code-modal", () => {
@@ -138,10 +153,9 @@
   });
 </script>
 
-<button id="bds-toggle" type="button" onclick={toggleDrawer} aria-label="Better DeepSeek">
-  <span class="bds-toggle-full" aria-hidden="true">BDS</span>
-  <span class="bds-toggle-short" aria-hidden="true">B</span>
-</button>
+<!-- BDS-UI F.4: the floating top BDS Settings trigger was removed on purpose.
+     The drawer opens from the sidebar account/profile menu (Plugins, Advanced
+     Settings) which calls ui.openDrawerSection(section). -->
 
 <Drawer bind:this={drawerRef} open={drawerOpen} onclose={closeDrawer} onopenapiplayground={openApiPlayground} />
 

@@ -44,9 +44,11 @@ internal fun applyRootWindowInsets(view: View, windowInsets: WindowInsetsCompat)
     val imeInsets = windowInsets.getInsets(WindowInsetsCompat.Type.ime())
     val bottomInset = maxOf(systemBars.bottom, imeInsets.bottom)
 
-    // Resize the WebView host from the bottom so the top of the viewport stays anchored like a
-    // normal adjustResize layout, while still preserving the persistent system-bar insets.
-    view.setPadding(systemBars.left, systemBars.top, systemBars.right, bottomInset)
+    // Edge-to-edge (BDS-UI F.8): the page must reach under the status bar. Padding the top edge
+    // used to push the whole WebView down and left a blank strip between the status bar and the
+    // page. Only the bottom edge keeps real inset handling, so the chat composer stays above the
+    // navigation bar and above the on-screen keyboard (adjustResize-style behaviour).
+    view.setPadding(systemBars.left, 0, systemBars.right, bottomInset)
     view.translationY = 0f
     return WindowInsetsCompat.CONSUMED
 }

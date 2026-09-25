@@ -200,7 +200,9 @@ export const test = base.extend({
   page: async ({ context }, use) => {
     const page = await context.newPage();
     await page.goto("https://chat.deepseek.com/");
-    await page.waitForSelector("#bds-toggle");
+    // BDS-UI F.4: the floating top BDS trigger is gone. The composer's Plus
+    // button is the BDS surface that is always present on first paint.
+    await page.waitForSelector("#bds-drawer");
     await page.waitForSelector(".bds-plus-btn");
     await expect(page.locator(".bds-plus-btn").first()).toBeInViewport();
     await use(page);

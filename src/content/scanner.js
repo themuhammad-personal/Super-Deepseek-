@@ -17,13 +17,12 @@ import AttachMenu from "./ui/AttachMenu.svelte";
 import ExpandToggle from "./ui/ExpandToggle.svelte";
 import RagPreview from "./ui/RagPreview.svelte";
 import DeepResearchToggle from "./ui/DeepResearchToggle.svelte";
-import DeepCodeToggle from "./ui/DeepCodeToggle.svelte";
 import { injectSearchInput } from "./ui/SidebarSearch.js";
 import { checkPendingExport } from "./tools/pending-export.js";
 import { hideTagsInSidebar, hideTagsInHeader, hideBdsTagsInPopovers } from "./tags/tag-hider.js";
 import { injectShareDialogWarning } from "./dom/share-dialog-injector.js";
 import { setDeepResearchEnabled } from "./deep-research.js";
-import { setDeepCodeEnabled, loadDeepCodeState } from "./deep-code.js";
+import { loadDeepCodeState } from "./deep-code.js";
 import { tryExecuteRawInput } from "./commands/executor.js";
 import { checkPendingHandoff } from "./commands/context-handoff.js";
 import Autocomplete from "./commands/Autocomplete.svelte";
@@ -556,11 +555,27 @@ export function scanInputArea() {
     nativeButton.style.setProperty("display", "none", "important");
   }
 
+  // ── Locked composer icon order (BDS-UI F.1 / E.1) ───────────────────────
+  // Left → right: 1 Plus (upload drawer), 2 Deep Think (native), 3 Web Search
+  // (native), 4 Deep Research (BDS), 5 Send (native). The Plus mount takes the
+  // left-most slot of the native prompt action row (the slot the now-hidden
+  // native upload trigger sits in) and the Deep Research mount is anchored
+  // immediately before the native send cluster, so neither BDS control can
+  // displace a native Deep Think / Web Search toggle.
+  const hasNativeActionRow =
+    deepResearchWrapper === findNativePromptActionRow() &&
+    deepResearchWrapper !== document.body;
+  const sendClusterAnchor = findSendClusterAnchor(deepResearchWrapper);
+  const plusAnchor = nativeButton && nativeButton.parentElement === deepResearchWrapper
+    ? nativeButton
+    : (hasNativeActionRow ? firstNativeRowChild(deepResearchWrapper) : insertBeforeNode);
+  const deepResearchAnchor = sendClusterAnchor;
+
   const deepResearchMountPoint = ensureComposerMount(
     deepResearchWrapper,
     "bds-deep-research-mount",
     ".bds-deep-research-toggle",
-    insertBeforeNode,
+    deepResearchAnchor,
   );
   if (!deepResearchMountPoint.dataset.bdsMounted) {
     mount(DeepResearchToggle, {
@@ -573,26 +588,13 @@ export function scanInputArea() {
     deepResearchMountPoint.dataset.bdsMounted = "1";
   }
 
-  const isAndroidTarget = process.env.BDS_TARGET === "android";
-  if (!isAndroidTarget) {
-    const deepCodeMountPoint = ensureComposerMount(
-      deepResearchWrapper,
-      "bds-deep-code-mount",
-      ".bds-deep-code-toggle",
-      insertBeforeNode,
-    );
-    if (!deepCodeMountPoint.dataset.bdsMounted) {
-      mount(DeepCodeToggle, {
-        target: deepCodeMountPoint,
-        props: {
-          enabled: state.deepCode.enabled,
-          onToggle: (enabled) => setDeepCodeEnabled(enabled),
-          onOpenModal: () => window.dispatchEvent(new CustomEvent("bds:open-deep-code-modal")),
-        },
-      });
-      deepCodeMountPoint.dataset.bdsMounted = "1";
-    }
-  }
+  // NOTE (BDS-UI E.1): the DeepCode toggle is no longer mounted inside the
+  // composer action row — the row is locked to exactly five icons (Plus, Deep
+  // Think, Web Search, Deep Research, Send). DeepCode keeps its full
+  // functionality and is now hosted by the BDS drawer (see Drawer.svelte),
+  // which is also where the old Android-only skip branch went: Android simply
+  // never renders that drawer section's composer-side toggle.
+  // TODO(BDS-UI): re-check DeepCode placement once the drawer redesign ships.
 
   if (!fileInput || !wrapper) {
     markComposerControlsMounted(deepResearchWrapper, wrapper);
@@ -604,10 +606,10 @@ export function scanInputArea() {
   }
 
   const mountPoint = ensureComposerMount(
-    wrapper,
+    hasNativeActionRow && deepResearchWrapper ? deepResearchWrapper : wrapper,
     "bds-attach-menu-mount",
     ".bds-attach-wrapper",
-    fileInput,
+    hasNativeActionRow ? plusAnchor : fileInput,
   );
   if (!mountPoint.dataset.bdsMounted) {
     mount(AttachMenu, {
@@ -887,6 +889,44 @@ function findDeepSeekStopButton() {
   }) || null;
 }
 
+/**
+ * Direct child of `row` that is the left-most non-BDS element — the slot the
+ * native Deep Think / Web Search toggles start at (BDS-UI E.1 slot 2).
+ */
+function firstNativeRowChild(row) {
+  if (!row) return null;
+  return Array.from(row.children).find((child) => !isBdsMountPoint(child)) || null;
+}
+
+/**
+ * Direct child of `row` that wraps the native send button, used as the anchor
+ * for the Deep Research toggle so it lands in slot 4 (right of the native
+ * toggles, left of Send).
+ */
+function findSendClusterAnchor(row) {
+  if (!row) return null;
+  const sendButton = findDeepSeekSendButton() || findDeepSeekStopButton();
+  if (!sendButton) return null;
+
+  let node = sendButton;
+  if (node.closest?.("#bds-root")) return null;
+  while (node.parentElement && node.parentElement !== row) {
+    node = node.parentElement;
+  }
+  return node.parentElement === row ? node : null;
+}
+
+function isBdsMountPoint(element) {
+  if (!element?.classList) return false;
+  return (
+    element.classList.contains("bds-deep-research-mount") ||
+    element.classList.contains("bds-deep-code-mount") ||
+    element.classList.contains("bds-attach-menu-mount") ||
+    element.classList.contains("bds-expand-toggle-mount") ||
+    element.classList.contains("bds-rag-preview-mount")
+  );
+}
+
 function findDeepResearchInsertAnchor(wrapper, fileInput, fileInputWrapper) {
   if (fileInput && wrapper === fileInputWrapper) {
     const attachMount = wrapper.querySelector?.(".bds-attach-menu-mount");
@@ -956,6 +996,14 @@ function ensureComposerMount(wrapper, className, descendantSelector, beforeNode)
     mountPoint.dataset.bdsMounted = "1";
   }
   if (mountPoint.parentElement !== wrapper) {
+    wrapper.insertBefore(mountPoint, beforeNode);
+  } else if (
+    beforeNode &&
+    beforeNode.parentElement === wrapper &&
+    mountPoint.nextElementSibling !== beforeNode
+  ) {
+    // The locked composer order may have changed between versions (or another
+    // mount was reordered); move the mount back to its anchor position.
     wrapper.insertBefore(mountPoint, beforeNode);
   }
   return mountPoint;

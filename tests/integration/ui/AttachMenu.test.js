@@ -72,10 +72,26 @@ function setupNativeInput() {
   return nativeInput;
 }
 
-function getAttachItemByText(text) {
-  return Array.from(document.querySelectorAll(".bds-attach-item")).find((item) =>
-    item.textContent.includes(text),
+// BDS-UI F.1: the Plus button opens the 2x3 Upload Drawer, so the old vertical
+// `.bds-attach-item` rows are now `.bds-ud-card` cards with short labels.
+const UPLOAD_CARD_LABELS = {
+  file: "File",
+  folder: "Index folder",
+  github: "GitHub repo",
+  web: "Web page",
+  command: "Command",
+  project: "Project",
+};
+
+function getUploadCard(label) {
+  const wanted = UPLOAD_CARD_LABELS[label] || label;
+  return Array.from(document.querySelectorAll(".bds-ud-card")).find((card) =>
+    card.querySelector(".bds-ud-card-label")?.textContent.trim() === wanted,
   );
+}
+
+function getUploadCards() {
+  return Array.from(document.querySelectorAll(".bds-ud-card"));
 }
 
 function installAndroidBridgeMock(handler = () => window.__testPickPayload) {
@@ -149,7 +165,7 @@ describe("AttachMenu integration", () => {
 
     target.querySelector(".bds-plus-btn").click();
     await flushUi();
-    document.querySelector(".bds-attach-item").click();
+    getUploadCard("file").click();
 
     expect(nativeInput.click).toHaveBeenCalledOnce();
     cleanup();
@@ -164,7 +180,7 @@ describe("AttachMenu integration", () => {
 
     target.querySelector(".bds-plus-btn").click();
     await flushUi();
-    document.querySelector(".bds-attach-item").click();
+    getUploadCard("file").click();
 
     expect(nativeInput.click).toHaveBeenCalledOnce();
     expect(nativeInput.multiple).toBe(true);
@@ -184,7 +200,8 @@ describe("AttachMenu integration", () => {
     await flushModelWatcher();
 
     expect(target.querySelector(".bds-attach-wrapper")).toBeTruthy();
-    expect(target.querySelector(".bds-project-btn")).toBeTruthy();
+    // BDS-UI F.1: no standalone Project icon in the composer any more.
+    expect(target.querySelector(".bds-project-btn")).toBeNull();
     expect(target.querySelector(".bds-mic-btn")).toBeTruthy();
     expect(target.querySelector(".bds-plus-btn")).toBeTruthy();
     cleanup();
@@ -219,9 +236,91 @@ describe("AttachMenu integration", () => {
     await flushModelWatcher();
 
     expect(target.querySelector(".bds-attach-wrapper")).toBeTruthy();
-    expect(target.querySelector(".bds-project-btn")).toBeTruthy();
+    expect(target.querySelector(".bds-project-btn")).toBeNull();
     expect(target.querySelector(".bds-mic-btn")).toBeTruthy();
     expect(target.querySelector(".bds-plus-btn")).toBeNull();
+    cleanup();
+  });
+
+  // ── BDS-UI F.1: the 2x3 Upload Drawer ────────────────────────────────────
+
+  it("renders the locked 2x3 upload grid in the documented order", async () => {
+    const nativeInput = setupNativeInput();
+    const { target, cleanup } = renderSvelte(AttachMenu, { nativeInput });
+
+    target.querySelector(".bds-plus-btn").click();
+    await flushUi();
+
+    const labels = getUploadCards().map((card) =>
+      card.querySelector(".bds-ud-card-label")?.textContent.trim(),
+    );
+    expect(labels).toEqual([
+      "File",
+      "Index folder",
+      "GitHub repo",
+      "Web page",
+      "Command",
+      "Project",
+    ]);
+    expect(document.querySelector(".bds-attach-dropdown .bds-upload-grid")).toBeTruthy();
+    cleanup();
+  });
+
+  it("removes the standalone Project composer icon and keeps the Project card working", async () => {
+    const nativeInput = setupNativeInput();
+    const { target, cleanup } = renderSvelte(AttachMenu, { nativeInput });
+
+    expect(target.querySelector(".bds-project-btn")).toBeNull();
+
+    target.querySelector(".bds-plus-btn").click();
+    await flushUi();
+    getUploadCard("project").click();
+    await flushUi();
+
+    expect(document.querySelector(".bds-project-panel")).toBeTruthy();
+    expect(projectManagerMocks.getFilesForProject).toHaveBeenCalledWith("p1");
+    cleanup();
+  });
+
+  // ── BDS-UI F.2: Command lives in the Upload Drawer ───────────────────────
+
+  it("opens the command list from the Command card and inserts the command", async () => {
+    const nativeInput = setupNativeInput();
+    const { target, cleanup } = renderSvelte(AttachMenu, { nativeInput });
+
+    target.querySelector(".bds-plus-btn").click();
+    await flushUi();
+    getUploadCard("command").click();
+    await flushUi();
+
+    const commandButtons = Array.from(document.querySelectorAll(".bds-ud-command"));
+    expect(commandButtons.length).toBeGreaterThan(0);
+    const searchCommand = commandButtons.find((button) =>
+      button.textContent.includes("/search"),
+    );
+    expect(searchCommand).toBeTruthy();
+
+    searchCommand.click();
+    await flushUi();
+
+    expect(document.querySelector("#chat-input").value).toBe("/search ");
+    cleanup();
+  });
+
+  it("routes Manage commands to the drawer commands section", async () => {
+    const openDrawerSection = vi.fn();
+    resetAppState({ ui: { showToast: vi.fn(), openDrawerSection } });
+    const nativeInput = setupNativeInput();
+    const { target, cleanup } = renderSvelte(AttachMenu, { nativeInput });
+
+    target.querySelector(".bds-plus-btn").click();
+    await flushUi();
+    getUploadCard("command").click();
+    await flushUi();
+    document.querySelector(".bds-ud-manage").click();
+    await flushUi();
+
+    expect(openDrawerSection).toHaveBeenCalledWith("commands");
     cleanup();
   });
 
@@ -267,7 +366,7 @@ describe("AttachMenu integration", () => {
 
     target.querySelector(".bds-plus-btn").click();
     await flushUi();
-    getAttachItemByText("Upload File").click();
+    getUploadCard("file").click();
     await flushNativePick();
 
     expect(window.AndroidBridge.pickFiles).toHaveBeenCalledWith("files+images", expect.any(String));
@@ -283,8 +382,7 @@ describe("AttachMenu integration", () => {
 
     target.querySelector(".bds-plus-btn").click();
     await flushUi();
-    const items = Array.from(document.querySelectorAll(".bds-attach-item"));
-    items.find((item) => item.textContent.includes("GitHub Repo")).click();
+    getUploadCard("github").click();
     await flushUi();
 
     const dialogInput = document.querySelector(".bds-github-input");
@@ -323,8 +421,7 @@ describe("AttachMenu integration", () => {
 
     target.querySelector(".bds-plus-btn").click();
     await flushUi();
-    const items = Array.from(document.querySelectorAll(".bds-attach-item"));
-    items.find((item) => item.textContent.includes("GitHub Repo")).click();
+    getUploadCard("github").click();
     await flushUi();
 
     const dialogInput = document.querySelector(".bds-github-input");
@@ -368,8 +465,7 @@ describe("AttachMenu integration", () => {
 
     target.querySelector(".bds-plus-btn").click();
     await flushUi();
-    const items = Array.from(document.querySelectorAll(".bds-attach-item"));
-    items.find((item) => item.textContent.includes("GitHub Repo")).click();
+    getUploadCard("github").click();
     await flushUi();
 
     const dialogInput = document.querySelector(".bds-github-input");
@@ -427,7 +523,9 @@ describe("AttachMenu integration", () => {
 
     const { target, cleanup } = renderSvelte(AttachMenu, { nativeInput });
 
-    target.querySelector(".bds-project-btn").click();
+    target.querySelector(".bds-plus-btn").click();
+    await flushUi();
+    getUploadCard("project").click();
     await flushUi();
     document.querySelector(".bds-pp-attach").click();
     await flushUi();
@@ -457,7 +555,7 @@ describe("AttachMenu integration", () => {
 
     target.querySelector(".bds-plus-btn").click();
     await flushUi();
-    getAttachItemByText("Upload File").click();
+    getUploadCard("file").click();
     await flushNativePick();
 
     expect(window.AndroidBridge.pickFiles).toHaveBeenCalledWith("files+images", expect.any(String));
@@ -481,7 +579,7 @@ describe("AttachMenu integration", () => {
     await flushModelWatcher();
     target.querySelector(".bds-plus-btn").click();
     await flushUi();
-    getAttachItemByText("Upload File").click();
+    getUploadCard("file").click();
     await flushNativePick();
 
     expect(window.AndroidBridge.pickFiles).toHaveBeenCalledWith("files", expect.any(String));
@@ -500,7 +598,7 @@ describe("AttachMenu integration", () => {
     await flushModelWatcher();
     target.querySelector(".bds-plus-btn").click();
     await flushUi();
-    getAttachItemByText("Upload File").click();
+    getUploadCard("file").click();
     await flushNativePick();
 
     expect(window.AndroidBridge.pickFiles).toHaveBeenCalledWith("files+images", expect.any(String));
@@ -519,7 +617,7 @@ describe("AttachMenu integration", () => {
     await flushModelWatcher();
     target.querySelector(".bds-plus-btn").click();
     await flushUi();
-    getAttachItemByText("Upload File").click();
+    getUploadCard("file").click();
     await flushNativePick();
 
     expect(Array.from(nativeInput.files, (file) => [file.name, file.type, file.size])).toEqual([
@@ -540,7 +638,7 @@ describe("AttachMenu integration", () => {
     await flushModelWatcher();
     target.querySelector(".bds-plus-btn").click();
     await flushUi();
-    getAttachItemByText("Upload File").click();
+    getUploadCard("file").click();
     await flushNativePick();
 
     expect(state.ui.showToast).toHaveBeenCalledWith(
@@ -565,7 +663,7 @@ describe("AttachMenu integration", () => {
     await flushModelWatcher();
     target.querySelector(".bds-plus-btn").click();
     await flushUi();
-    getAttachItemByText("Upload Folder").click();
+    getUploadCard("folder").click();
     await flushNativePick();
 
     expect(window.AndroidBridge.pickFiles).toHaveBeenCalledWith("folder+images", expect.any(String));
@@ -586,7 +684,7 @@ describe("AttachMenu integration", () => {
 
     target.querySelector(".bds-plus-btn").click();
     await flushUi();
-    getAttachItemByText("Upload File").click();
+    getUploadCard("file").click();
     await flushNativePick();
 
     expect(nativeInput.files).toHaveLength(0);
@@ -606,7 +704,7 @@ describe("AttachMenu integration", () => {
 
     target.querySelector(".bds-plus-btn").click();
     await flushUi();
-    getAttachItemByText("Upload File").click();
+    getUploadCard("file").click();
     await flushNativePick();
 
     expect(Array.from(nativeInput.files, (file) => file.name)).toEqual(["a.md"]);
@@ -627,7 +725,7 @@ describe("AttachMenu integration", () => {
 
     target.querySelector(".bds-plus-btn").click();
     await flushUi();
-    getAttachItemByText("Upload Folder").click();
+    getUploadCard("folder").click();
     await flushNativePick();
 
     expect(state.ui.showToast).toHaveBeenCalledWith(
@@ -645,7 +743,7 @@ describe("AttachMenu integration", () => {
 
     target.querySelector(".bds-plus-btn").click();
     await flushUi();
-    getAttachItemByText("Upload File").click();
+    getUploadCard("file").click();
     await vi.advanceTimersByTimeAsync(10000);
     await flushUi();
 
@@ -662,7 +760,7 @@ describe("AttachMenu integration", () => {
 
     target.querySelector(".bds-plus-btn").click();
     await flushUi();
-    getAttachItemByText("Upload File").click();
+    getUploadCard("file").click();
     await flushNativePick();
 
     expect(nativeInput.files).toHaveLength(0);
@@ -684,7 +782,7 @@ describe("AttachMenu integration", () => {
 
       target.querySelector(".bds-plus-btn").click();
       await flushUi();
-      getAttachItemByText("Upload File").click();
+      getUploadCard("file").click();
       await flushNativePick();
 
       expect(Array.from(inputB.files, (file) => file.name)).toEqual(["a.md"]);
@@ -702,7 +800,7 @@ describe("AttachMenu integration", () => {
 
       target.querySelector(".bds-plus-btn").click();
       await flushUi();
-      getAttachItemByText("Upload File").click();
+      getUploadCard("file").click();
       await flushNativePick();
       expect(Array.from(inputA.files, (file) => file.name)).toEqual(["a.md"]);
 
@@ -711,7 +809,7 @@ describe("AttachMenu integration", () => {
 
       target.querySelector(".bds-plus-btn").click();
       await flushUi();
-      getAttachItemByText("Upload File").click();
+      getUploadCard("file").click();
       await flushNativePick();
 
       expect(Array.from(inputB.files, (file) => file.name)).toEqual(["a.md"]);
@@ -728,7 +826,7 @@ describe("AttachMenu integration", () => {
 
       target.querySelector(".bds-plus-btn").click();
       await flushUi();
-      getAttachItemByText("Upload File").click();
+      getUploadCard("file").click();
       await flushUi();
 
       expect(inputB.click).toHaveBeenCalledOnce();

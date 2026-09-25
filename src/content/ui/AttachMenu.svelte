@@ -29,6 +29,8 @@
   import appState from "../state.js";
   import { BRIDGE_EVENTS } from "../../lib/constants.js";
   import { t } from "../../lib/i18n.svelte.js";
+import { COMMANDS } from "../commands/registry.js";
+import { insertCommandIntoChat } from "../commands/insert-command.js";
   import { getFlag, getConfig, REMOTE_CONFIG_EVENT, detectModelType } from "../../lib/remote-config.svelte.js";
   import { VADProcessor } from "../vad-processor.js";
   import { findActiveFileInput } from "../scanner.js";
@@ -52,6 +54,9 @@
 
   let isOpen = $state(false);
   let menuRef;
+  // The dropdown is portaled to <body>, so it is never a descendant of
+  // menuRef — it needs its own ref for outside-click detection (BDS-UI F.1).
+  let dropdownRef;
   let dropdownStyle = $state("");
 
   // GitHub dialog state
@@ -127,6 +132,10 @@
   let shouldShowWeb = $state(true);
   let shouldShowProject = $state(true);
   let shouldShowVoice = $state(true);
+  // Upload Drawer (BDS-UI F.1): the Plus button opens a 2x3 card grid.
+  // `commandScope` shows the command list inside the same drawer (F.2) — it
+  // reuses the existing command registry and the shared insertion helper.
+  let commandScope = $state(false);
 
   function updateVisibility() {
     try {
@@ -443,10 +452,42 @@
   function toggleMenu(e) {
     e.stopPropagation();
     if (!isOpen) {
+      commandScope = false;
       updatePosition();
       isOpen = true;
     } else {
       isOpen = false;
+      commandScope = false;
+    }
+  }
+
+  function openCommandScope(e) {
+    e?.stopPropagation?.();
+    commandScope = true;
+  }
+
+  /**
+   * Inserts `/<id> ` into the chat editor through the shared command helper and
+   * closes the upload drawer.
+   */
+  function runCommand(commandId) {
+    const inserted = insertCommandIntoChat(commandId);
+    if (!inserted && appState.ui) {
+      appState.ui.showToast(t("attachMenu.noInputField"));
+    }
+    closeMenu();
+  }
+
+  /**
+   * Opens the full command manager (custom mappings, add/remove commands) in
+   * the BDS drawer. The registry/executor stay untouched — only the entry
+   * point moved (BDS-UI F.2).
+   */
+  function openCommandManager(e) {
+    e?.stopPropagation?.();
+    closeMenu();
+    if (appState.ui?.openDrawerSection) {
+      appState.ui.openDrawerSection("commands");
     }
   }
 
@@ -455,7 +496,8 @@
     const rect = menuRef.getBoundingClientRect();
     const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
     const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
-    const menuWidth = 176;
+    // BDS-UI F.1: keep in sync with .bds-attach-dropdown { min-width: 224px }.
+    const menuWidth = 224;
     const menuHeight = estimateDropdownHeight();
     const left = clamp(rect.right - menuWidth, 8, viewportWidth - menuWidth - 8);
     const top = clamp(rect.top - menuHeight - 8, 8, viewportHeight - menuHeight - 8);
@@ -474,13 +516,20 @@
   }
 
   function estimateDropdownHeight() {
-    let itemCount = 0;
-    if (shouldShowUploadFile) itemCount += 1;
-    if (shouldShowUploadFolder && supportsFolderUpload) itemCount += 1;
-    if (shouldShowGithub) itemCount += 1;
-    if (shouldShowWeb) itemCount += 1;
-    const dividerHeight = shouldShowGithub || shouldShowWeb ? 9 : 0;
-    return 12 + itemCount * 36 + dividerHeight;
+    if (commandScope) {
+      // Header + one row per built-in command + manage button.
+      return 52 + COMMANDS.length * 44 + 40;
+    }
+    // 2x3 card grid: header + rows of 76px cards, 6px gap between rows.
+    let cardCount = 0;
+    if (shouldShowUploadFile) cardCount += 1;
+    if (shouldShowUploadFolder && supportsFolderUpload) cardCount += 1;
+    if (shouldShowGithub) cardCount += 1;
+    if (shouldShowWeb) cardCount += 1;
+    cardCount += 1; // Command
+    if (shouldShowProject) cardCount += 1;
+    const rows = Math.max(1, Math.ceil(cardCount / 2));
+    return 44 + rows * 76 + (rows - 1) * 6;
   }
 
   function clamp(value, min, max) {
@@ -490,6 +539,7 @@
 
   function closeMenu() {
     isOpen = false;
+    commandScope = false;
   }
 
   onMount(() => {
@@ -521,9 +571,10 @@
 
   function handleClickOutside(e) {
     const inMenu = menuRef && menuRef.contains(e.target);
+    const inDropdown = dropdownRef && dropdownRef.contains(e.target);
     const inDialog = dialogRef && dialogRef.contains(e.target);
     const inPanel = projectPanelRef && projectPanelRef.contains(e.target);
-    if (!inMenu && !inDialog && !inPanel) {
+    if (!inMenu && !inDropdown && !inDialog && !inPanel) {
       closeMenu();
       showProjectPanel = false;
     }
@@ -843,6 +894,7 @@
       projectPanelStyle =
         `bottom: calc(100vh - ${rect.top}px + 8px); left: ${left}px; max-width: ${Math.min(panelW, viewportW - 16)}px;`;
     }
+    closeMenu();
     showProjectPanel = true;
   }
 
@@ -936,32 +988,9 @@
   </button>
   {/if}
 
-  {#if shouldShowProject}
-  <button
-    class="bds-project-btn"
-    bind:this={projectBtnRef}
-    onclick={openProjectPanel}
-    title={t('attachMenu.attachProject')}
-  >
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="17"
-      height="17"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      style="opacity:0.65"
-    >
-      <path
-        d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
-      />
-    </svg>
-  </button>
-  {/if}
-
+  <!-- BDS-UI F.1: the standalone Project composer icon was removed. Projects
+       are attached from the Upload Drawer's "Project" card below (same
+       `openProjectPanel` flow, same project state). -->
   {#if shouldShowVoice && supportsVoiceInput}
     <button
       class="bds-mic-btn {isRecording ? 'bds-recording' : ''}"
@@ -997,130 +1026,227 @@
       class="bds-attach-dropdown"
       style={dropdownStyle}
       use:portal
+      bind:this={dropdownRef}
       onclick={(event) => event.stopPropagation()}
     >
-      {#if shouldShowUploadFile}
-      <button type="button" class="bds-attach-item" onclick={handleUploadFile}>
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          class="bds-item-icon"
-          ><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
-          ></path><polyline points="14 2 14 8 20 8"></polyline><line
-            x1="12"
-            y1="18"
-            x2="12"
-            y2="12"
-          ></line><line x1="9" y1="15" x2="15" y2="15"></line></svg
-        >
-        {t('attachMenu.uploadFile')}
-      </button>
-      {/if}
-      {#if shouldShowUploadFolder && supportsFolderUpload}
-        <button type="button" class="bds-attach-item" onclick={handleUploadFolder}>
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            class="bds-item-icon"
-            ><path
-              d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
-            ></path><line x1="12" y1="11" x2="12" y2="17"></line><line
-              x1="9"
-              y1="14"
-              x2="15"
-              y2="14"
-            ></line></svg
+      {#if commandScope}
+        <div class="bds-ud-subheader">
+          <button
+            type="button"
+            class="bds-ud-back"
+            onclick={() => (commandScope = false)}
+            aria-label={t('uploadDrawer.back')}
+            title={t('uploadDrawer.back')}
           >
-          {t('attachMenu.uploadFolder')}
-        </button>
-      {/if}
-      {#if shouldShowGithub || shouldShowWeb}
-        <div class="bds-attach-divider"></div>
-      {/if}
-      {#if shouldShowGithub}
-      <button type="button" class="bds-attach-item" onclick={handleGithubImport}>
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="currentColor"
-          class="bds-item-icon"
-          ><path
-            d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"
-          ></path></svg
-        >
-        <span class="bds-attach-item-label">
-          <span>{t('attachMenu.githubRepo')}</span>
-          {#if hasGithubToken()}
-            <span
-              class="bds-github-auth-icon"
-              aria-label={t('attachMenu.githubAuthLabel')}
-              title={t('attachMenu.githubAuthLabel')}
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              ><line x1="19" y1="12" x2="5" y2="12"></line><polyline
+                points="12 19 5 12 12 5"
+              ></polyline></svg
             >
+          </button>
+          <span class="bds-ud-subtitle">{t('uploadDrawer.command')}</span>
+        </div>
+        <div class="bds-ud-commands">
+          {#each COMMANDS as cmd (cmd.id)}
+            <button
+              type="button"
+              class="bds-ud-command"
+              onclick={() => runCommand(cmd.id)}
+            >
+              <span class="bds-ud-command-icon">{@html cmd.icon}</span>
+              <span class="bds-ud-command-info">
+                <span class="bds-ud-command-name">/{cmd.id}</span>
+                <span class="bds-ud-command-desc">{t(cmd.descKey)}</span>
+              </span>
+            </button>
+          {/each}
+        </div>
+        <button type="button" class="bds-ud-manage" onclick={openCommandManager}>
+          {t('commands.manage')}
+        </button>
+      {:else}
+        <div class="bds-ud-header">
+          <span class="bds-ud-title">{t('uploadDrawer.title')}</span>
+          <span class="bds-ud-subtitle-muted">{t('uploadDrawer.subtitle')}</span>
+        </div>
+        <div class="bds-upload-grid">
+          {#if shouldShowUploadFile}
+            <button type="button" class="bds-ud-card" onclick={handleUploadFile}>
+              <span class="bds-ud-card-icon">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="22"
+                  height="22"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  ><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path
+                  ><polyline points="14 2 14 8 20 8"></polyline><line
+                    x1="12"
+                    y1="18"
+                    x2="12"
+                    y2="12"
+                  ></line><line x1="9" y1="15" x2="15" y2="15"></line></svg
+                >
+              </span>
+              <span class="bds-ud-card-label">{t('uploadDrawer.file')}</span>
+            </button>
+          {/if}
+          {#if shouldShowUploadFolder && supportsFolderUpload}
+            <button type="button" class="bds-ud-card" onclick={handleUploadFolder}>
+              <span class="bds-ud-card-icon">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="22"
+                  height="22"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  ><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path
+                  ><line x1="12" y1="11" x2="12" y2="17"></line><line
+                    x1="9"
+                    y1="14"
+                    x2="15"
+                    y2="14"
+                  ></line></svg
+                >
+              </span>
+              <span class="bds-ud-card-label">{t('uploadDrawer.folder')}</span>
+            </button>
+          {/if}
+          {#if shouldShowGithub}
+            <button type="button" class="bds-ud-card" onclick={handleGithubImport}>
+              <span class="bds-ud-card-icon">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="22"
+                  height="22"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                  ><path
+                    d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"
+                  ></path></svg
+                >
+                {#if hasGithubToken()}
+                  <span
+                    class="bds-github-auth-icon"
+                    aria-label={t('attachMenu.githubAuthLabel')}
+                    title={t('attachMenu.githubAuthLabel')}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="11"
+                      height="11"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.15"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <rect x="5" y="11" width="14" height="10" rx="2"></rect>
+                      <path d="M8 11V8a4 4 0 0 1 8 0v3"></path>
+                    </svg>
+                  </span>
+                {/if}
+              </span>
+              <span class="bds-ud-card-label">{t('uploadDrawer.github')}</span>
+            </button>
+          {/if}
+          {#if shouldShowWeb}
+            <button type="button" class="bds-ud-card" onclick={handleWebImport}>
+              <span class="bds-ud-card-icon">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="22"
+                  height="22"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  ><circle cx="12" cy="12" r="10"></circle><line
+                    x1="2"
+                    y1="12"
+                    x2="22"
+                    y2="12"
+                  ></line><path
+                    d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"
+                  ></path></svg
+                >
+              </span>
+              <span class="bds-ud-card-label">{t('uploadDrawer.web')}</span>
+            </button>
+          {/if}
+          <button type="button" class="bds-ud-card" onclick={openCommandScope}>
+            <span class="bds-ud-card-icon">
               <svg
                 xmlns="http://www.w3.org/2000/svg"
-                width="11"
-                height="11"
+                width="22"
+                height="22"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
-                stroke-width="2.15"
+                stroke-width="1.8"
                 stroke-linecap="round"
                 stroke-linejoin="round"
+                ><polyline points="4 17 10 11 4 5"></polyline><line
+                  x1="12"
+                  y1="19"
+                  x2="20"
+                  y2="19"
+                ></line></svg
               >
-                <rect x="5" y="11" width="14" height="10" rx="2"></rect>
-                <path d="M8 11V8a4 4 0 0 1 8 0v3"></path>
-              </svg>
             </span>
+            <span class="bds-ud-card-label">{t('uploadDrawer.command')}</span>
+          </button>
+          {#if shouldShowProject}
+            <button
+              type="button"
+              class="bds-ud-card bds-ud-card--project"
+              bind:this={projectBtnRef}
+              onclick={openProjectPanel}
+            >
+              <span class="bds-ud-card-icon">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="22"
+                  height="22"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  ><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path
+                  ><path d="M9 13h6"></path><path d="M12 10v6"></path></svg
+                >
+              </span>
+              <span class="bds-ud-card-label">{t('uploadDrawer.project')}</span>
+            </button>
           {/if}
-        </span>
-      </button>
-      {/if}
-      {#if shouldShowWeb}
-      <button type="button" class="bds-attach-item" onclick={handleWebImport}>
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          class="bds-item-icon"
-          ><circle cx="12" cy="12" r="10"></circle><line
-            x1="2"
-            y1="12"
-            x2="22"
-            y2="12"
-          ></line><path
-            d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"
-          ></path></svg
-        >
-        {t('attachMenu.fetchWebPage')}
-      </button>
+        </div>
       {/if}
     </div>
   {/if}
 </div>
 {/if}
-
 {#if showGithubDialog}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -1531,33 +1657,216 @@
     position: fixed;
     background: var(--bds-bg-panel);
     border: 1px solid var(--bds-border);
-    border-radius: var(--bds-radius, 14px);
+    border-radius: var(--bds-radius, 16px);
     box-shadow: var(--bds-shadow);
-    padding: 6px;
+    padding: 10px;
     display: flex;
     flex-direction: column;
-    min-width: 160px;
+    min-width: 224px;
+    max-width: min(320px, calc(100vw - 16px));
     z-index: 999999;
   }
 
-  .bds-attach-item {
-    background: none;
-    border: none;
-    color: var(--bds-text-primary);
-    padding: 10px 12px;
-    text-align: left;
-    border-radius: 8px;
-    cursor: pointer;
+  /* ─── Upload Drawer (BDS-UI F.1): 2x3 premium card grid ─── */
+
+  .bds-ud-header {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 2px 4px 10px;
+  }
+
+  .bds-ud-title {
     font-size: 13px;
+    font-weight: 650;
+    letter-spacing: 0.2px;
+    color: var(--bds-text-primary);
+  }
+
+  .bds-ud-subtitle-muted {
+    font-size: 10.5px;
+    color: var(--bds-text-tertiary, var(--bds-text-secondary));
+    opacity: 0.75;
+  }
+
+  .bds-upload-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .bds-ud-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 76px;
+    padding: 12px 12px 10px;
+    border-radius: 12px;
+    border: 1px solid var(--bds-border);
+    background: linear-gradient(
+      160deg,
+      color-mix(in srgb, var(--bds-bg-hover) 90%, transparent),
+      transparent 70%
+    );
+    color: var(--bds-text-primary);
+    font-size: 12px;
+    font-weight: 550;
+    text-align: left;
+    cursor: pointer;
+    transition:
+      transform 0.16s ease,
+      border-color 0.16s ease,
+      background-color 0.16s ease,
+      box-shadow 0.16s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .bds-ud-card:hover,
+  .bds-ud-card:focus-visible {
+    border-color: color-mix(in srgb, var(--bds-accent) 55%, var(--bds-border));
+    box-shadow: 0 6px 18px -12px var(--bds-accent);
+    transform: translateY(-1px);
+    outline: none;
+  }
+
+  .bds-ud-card:active {
+    transform: scale(0.98);
+  }
+
+  .bds-ud-card-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    color: var(--bds-accent);
+    background: var(--bds-accent-glow);
+    flex-shrink: 0;
+  }
+
+  .bds-ud-card-label {
+    line-height: 1.25;
+    letter-spacing: 0.1px;
+  }
+
+  .bds-ud-card--project .bds-ud-card-icon {
+    color: #6ea8fe;
+    background: color-mix(in srgb, #6ea8fe 16%, transparent);
+  }
+
+  /* ─── Command sub-view (BDS-UI F.2) ─── */
+
+  .bds-ud-subheader {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 2px 8px;
+  }
+
+  .bds-ud-back {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 1px solid var(--bds-border);
+    border-radius: 9px;
+    background: transparent;
+    color: var(--bds-text-primary);
+    cursor: pointer;
+    transition: background-color 0.16s ease;
+  }
+
+  .bds-ud-back:hover {
+    background: var(--bds-bg-hover);
+  }
+
+  .bds-ud-subtitle {
+    font-size: 12.5px;
+    font-weight: 650;
+    color: var(--bds-text-primary);
+  }
+
+  .bds-ud-commands {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: min(46vh, 320px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .bds-ud-command {
     display: flex;
     align-items: center;
     gap: 10px;
-    transition: background-color var(--bds-transition, 0.18s ease);
-    white-space: nowrap;
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--bds-text-primary);
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.16s ease, border-color 0.16s ease;
   }
 
-  .bds-attach-item:hover {
+  .bds-ud-command:hover {
     background: var(--bds-bg-hover);
+    border-color: var(--bds-border);
+  }
+
+  .bds-ud-command-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    color: var(--bds-accent);
+    background: var(--bds-accent-glow);
+    flex-shrink: 0;
+  }
+
+  .bds-ud-command-info {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .bds-ud-command-name {
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .bds-ud-command-desc {
+    font-size: 10.5px;
+    opacity: 0.65;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .bds-ud-manage {
+    margin-top: 8px;
+    padding: 10px 12px;
+    border-radius: 11px;
+    border: 1px solid var(--bds-border);
+    background: var(--bds-bg-hover);
+    color: var(--bds-text-primary);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color 0.16s ease, background-color 0.16s ease;
+  }
+
+  .bds-ud-manage:hover {
+    border-color: color-mix(in srgb, var(--bds-accent) 45%, var(--bds-border));
   }
 
   .bds-item-icon {
@@ -1866,29 +2175,9 @@
 
   /* ─── Project Panel ─── */
 
-  .bds-project-btn {
-    background: transparent;
-    border: none;
-    color: var(--bds-accent);
-    width: 30px;
-    height: 30px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: background-color var(--bds-transition, 0.18s ease);
-    flex-shrink: 0;
-    padding: 0;
-  }
-
-  .bds-project-btn:hover {
-    background-color: var(--bds-accent-glow);
-  }
-
-  .bds-project-btn--active {
-    color: var(--bds-accent);
-  }
+  /* BDS-UI F.1: the standalone composer Project button was removed — the
+     Project entry now lives in the upload drawer grid (`.bds-ud-card--project`)
+     and reuses the very same panel below. */
 
   .bds-project-panel {
     position: fixed;

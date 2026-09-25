@@ -21,20 +21,67 @@ const TAG_ICON = `
   <line x1="7" y1="7" x2="7.01" y2="7"/>
 </svg>`;
 
-// Download Icon
-const DOWNLOAD_ICON = `
+// Plugins (MCP) Icon — used by the account-menu "Plugins" entry
+const PLUGINS_ICON = `
 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-  <polyline points="7 10 12 15 17 10"/>
-  <line x1="12" y1="15" x2="12" y2="3"/>
+  <path d="M9 3v4a2 2 0 0 1-2 2H3"/>
+  <path d="M15 3v4a2 2 0 0 0 2 2h4"/>
+  <path d="M9 21v-4a2 2 0 0 0-2-2H3"/>
+  <path d="M15 21v-4a2 2 0 0 1 2-2h4"/>
 </svg>`;
 
-const GET_BDS_APP_URL = "https://github.com/EdgeTypE/better-deepseek/releases";
-
-const WHATS_NEW_ICON = `
+// Advanced Settings Icon — used by the account-menu "Advanced Settings" entry
+const ADVANCED_ICON = `
 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+  <circle cx="12" cy="12" r="3"/>
+  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6h.09A1.65 1.65 0 0 0 10 3.09V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
 </svg>`;
+
+// ── Menu discrimination (BDS-UI F.5) ───────────────────────────────────────
+// DeepSeek renders both the chat-context menu (three-dot on a chat row) and the
+// sidebar account/profile menu as `.ds-dropdown-menu`. Tags / Export Chat must
+// only ever land in the chat menu and the BDS settings entries only in the
+// account menu, so every injection is gated on the labels the menu really has.
+
+const ACCOUNT_MENU_LOGOUT_LABELS = ["log out", "logout", "sign out", "log-out"];
+const ACCOUNT_MENU_SETTINGS_LABELS = ["settings"];
+const ACCOUNT_MENU_HELP_LABELS = ["help & feedback", "help and feedback"];
+const CHAT_MENU_LABELS = ["delete", "rename"];
+
+function menuOptionLabels(menu) {
+  if (!menu) return [];
+  return Array.from(menu.querySelectorAll(".ds-dropdown-menu-option__label"))
+    .map((node) => (node.textContent || "").trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function menuHasAnyLabel(labels, needles) {
+  return needles.some((needle) => labels.some((label) => label.includes(needle)));
+}
+
+/** True only for the sidebar account/profile popover. */
+export function isAccountMenu(menu) {
+  const labels = menuOptionLabels(menu);
+  if (!labels.length) return false;
+  if (menuHasAnyLabel(labels, CHAT_MENU_LABELS)) return false;
+  if (menuHasAnyLabel(labels, ACCOUNT_MENU_LOGOUT_LABELS)) return true;
+  return menuHasAnyLabel(labels, ACCOUNT_MENU_SETTINGS_LABELS);
+}
+
+/** True only for a chat-row context menu (three-dot menu next to a chat). */
+export function isChatContextMenu(menu) {
+  if (!menu) return false;
+  const labels = menuOptionLabels(menu);
+  if (!labels.length) return false;
+  if (menuHasAnyLabel(labels, ACCOUNT_MENU_LOGOUT_LABELS)) return false;
+  if (menuHasAnyLabel(labels, ACCOUNT_MENU_HELP_LABELS)) return false;
+  return menuHasAnyLabel(labels, CHAT_MENU_LABELS);
+}
+
+/** Lets React close the native dropdown instead of force-removing DOM nodes. */
+function dismissNativeMenu() {
+  document.body.click();
+}
 
 export function initSidebarMenuInjector() {
   // Capture the chat URL from any click inside a sidebar chat link.
@@ -135,6 +182,11 @@ async function handleExportAction(format) {
 function injectOptions(menu) {
   if (menu.querySelector(".bds-export-option")) return;
 
+  // BDS-UI F.5 / D.6: chat-only entries. Without this guard the Tags / Export
+  // Chat rows leaked into the sidebar account popover whenever no "Delete"
+  // option existed to anchor them (they were appended to the end instead).
+  if (!isChatContextMenu(menu)) return;
+
   const deleteOption = Array.from(
     menu.querySelectorAll(".ds-dropdown-menu-option")
   ).find((opt) =>
@@ -171,43 +223,54 @@ function injectOptions(menu) {
 }
 
 function injectSettingsDrawerOptions(menu) {
-  if (menu.querySelector(".bds-whats-new-option")) return;
+  if (!menu || menu.querySelector(".bds-plugins-option")) return;
 
-  const targetLabels = ["Download mobile App", "Get App"];
-  let targetOption = null;
-  for (const label of targetLabels) {
-    targetOption = Array.from(
-      menu.querySelectorAll(".ds-dropdown-menu-option")
-    ).find((opt) =>
-      opt.querySelector(".ds-dropdown-menu-option__label")?.textContent.trim().includes(label)
-    );
-    if (targetOption) break;
-  }
+  // BDS-UI F.5: the account popover carries exactly two BDS-owned entries —
+  // "Plugins" and "Advanced Settings". "Official Settings" and "Log out" stay
+  // native/untouched (never intercepted) and are used only as anchors.
+  //
+  // Get BDS App and What's New deliberately do NOT live here any more; they
+  // were relocated to the drawer footer next to the GitHub link.
+  if (!isAccountMenu(menu)) return;
 
-  if (!targetOption) return;
+  const options = Array.from(menu.querySelectorAll(".ds-dropdown-menu-option"));
+  const labelOf = (opt) =>
+    (opt.querySelector(".ds-dropdown-menu-option__label")?.textContent || "").trim().toLowerCase();
+  const anchor =
+    options.find((opt) => menuHasAnyLabel([labelOf(opt)], ACCOUNT_MENU_SETTINGS_LABELS)) ||
+    options.find((opt) => menuHasAnyLabel([labelOf(opt)], ACCOUNT_MENU_LOGOUT_LABELS)) ||
+    null;
 
-  const bdsOption = createMenuOption(
-    i18n.t('sidebarMenu.getBdsApp'),
-    DOWNLOAD_ICON,
-    "bds-get-app-option",
-    () => {
-      window.open(GET_BDS_APP_URL, "_blank");
-    }
+  if (!anchor) return;
+
+  const openSection = (section) => {
+    dismissNativeMenu();
+    // Let React finish closing the popover before the drawer animates in.
+    setTimeout(() => {
+      if (appState.ui?.openDrawerSection) {
+        appState.ui.openDrawerSection(section);
+      }
+    }, 50);
+  };
+
+  const advancedOption = createMenuOption(
+    i18n.t('sidebarMenu.advancedSettings'),
+    ADVANCED_ICON,
+    "bds-advanced-settings-option",
+    () => openSection("advanced")
   );
 
-  targetOption.parentNode.insertBefore(bdsOption, targetOption.nextSibling);
-
-  const whatsNewOption = createMenuOption(
-    i18n.t('sidebarMenu.whatsNew'),
-    WHATS_NEW_ICON,
-    "bds-whats-new-option",
-    () => {
-      appState.whatsNewPending = true;
-      if (appState.ui) appState.ui.refreshWhatsNew();
-    }
+  const pluginsOption = createMenuOption(
+    i18n.t('sidebarMenu.plugins'),
+    PLUGINS_ICON,
+    "bds-plugins-option",
+    () => openSection("plugins")
   );
 
-  bdsOption.parentNode.insertBefore(whatsNewOption, bdsOption.nextSibling);
+  // Locked order (BDS-UI F.5): Plugins, then Advanced Settings, then the
+  // native Official Settings / Log out rows.
+  anchor.parentNode.insertBefore(pluginsOption, anchor);
+  anchor.parentNode.insertBefore(advancedOption, anchor);
 }
 
 function createMenuOption(label, iconHtml, className, onClick) {

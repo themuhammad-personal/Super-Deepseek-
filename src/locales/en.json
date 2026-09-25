@@ -56,7 +56,11 @@
       "sectionChatTags": "Chat Tags",
       "sectionSavedItems": "Saved Items",
       "sectionCssSnippets": "CSS Snippets",
-      "sectionMcpServers": "MCP Servers"
+      "sectionMcpServers": "MCP Servers",
+      "sectionDeepCode": "DeepCode",
+      "deepCodeHint": "Local codebase & harness integration",
+      "getBdsApp": "Get BDS App",
+      "whatsNew": "What's New?"
     },
     "settings": {
       "generalSettings": "General Settings",
@@ -183,7 +187,6 @@
       "saveAsSnippet": "Save as Snippet",
       "manageSnippets": "Manage CSS Snippets",
       "restore": "Restore",
-      "delete": "Delete",
       "enterSnippetName": "Enter snippet name:",
       "snippetSaved": "Snippet saved!",
       "snippetDeleted": "Snippet deleted",
@@ -396,9 +399,6 @@
       "noProjectSelected": "No project selected",
       "webImportTitle": "Fetch Web Page",
       "webPlaceholder": "https://example.com/article",
-      "close": "Close",
-      "fetch": "Fetch",
-      "fetching": "Fetching...",
       "noSpeechRecognition": "Browser does not support Speech Recognition.",
       "voiceError": "Voice Error: {{msg}}",
       "noInputField": "Could not find input field.",
@@ -781,7 +781,10 @@
       "tags": "Tags (BDS)",
       "exportChat": "Export Chat (BDS)",
       "getBdsApp": "Get BDS App",
-      "whatsNew": "What's New?"
+      "whatsNew": "What's New?",
+      "plugins": "Plugins",
+      "advancedSettings": "Advanced Settings",
+      "officialSettings": "Official Settings"
     },
     "savedItems": {
       "title": "Saved Items",
@@ -842,7 +845,7 @@
       "cmdHint": "/mycommand (lowercase, no spaces)",
       "add": "Add",
       "categorySnippet": "snippet",
-      "autocompleteHint": "Tab \u21b9 complete \u00b7 \u21b5 execute",
+      "autocompleteHint": "Tab ↹ complete · ↵ execute",
       "cmdSearchDesc": "Search the web and inject results into chat",
       "cmdSearchUsage": "/search <query>",
       "cmdNewDesc": "Start a new conversation",
@@ -1383,8 +1386,8 @@
       "columnOptions": "Column options",
       "hideRow": "Hide row",
       "manageColumnsRows": "Manage columns & rows",
-      "sortAsc": "\u25B2 Sort A \u2192 Z",
-      "sortDesc": "\u25BC Sort Z \u2192 A",
+      "sortAsc": "▲ Sort A → Z",
+      "sortDesc": "▼ Sort Z → A",
       "hideColumn": "Hide column",
       "showColumn": "Show column",
       "columns": "Columns",
@@ -1396,7 +1399,7 @@
       "searchEngineWarning": "Shared conversations may be discovered and indexed by search engines."
     },
     "tips": {
-      "title": "\uD83D\uDCA1 Tip",
+      "title": "💡 Tip",
       "disableInSettings": "You can disable this from Settings.",
       "0": "To export a chat, click the ... button next to the session in the chat history.",
       "1": "You can disable this tip box from Settings.",
@@ -1411,6 +1414,22 @@
       "10": "We want to add more language support to Better DeepSeek. If you want to add your own language, check it out <a href=\"https://github.com/EdgeTypE/better-deepseek/blob/main/LOCALIZATION.md\" target=\"_blank\" rel=\"noopener noreferrer\">here</a>. Also, if you notice any translation errors, you can fix them.",
       "11": "You can assign tags to any chat session by clicking the ... button in the session history. Then use those tags to quickly search or filter your conversations.",
       "12": "You can create new skills or characters just by asking DeepSeek. Simply tell it what you need."
+    },
+    "uploadDrawer": {
+      "title": "Upload",
+      "subtitle": "Insert content into the chat",
+      "file": "File",
+      "folder": "Index folder",
+      "github": "GitHub repo",
+      "web": "Web page",
+      "command": "Command",
+      "project": "Project",
+      "back": "Back"
+    },
+    "plugins": {
+      "title": "Plugins",
+      "subtitle": "MCP servers & plugin options",
+      "empty": "No MCP servers connected yet."
     }
   }
 }

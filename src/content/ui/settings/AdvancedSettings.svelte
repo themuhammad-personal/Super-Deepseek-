@@ -1,21 +1,23 @@
 <script>
+
   import { onMount } from "svelte";
-  import appState from "../state.js";
-  import { pushConfigToPage, discoverMcpToolSchemas } from "../bridge.js";
+  import appState from "../../state.js";
+  import { pushConfigToPage } from "../../bridge.js";
   import {
     STORAGE_KEYS,
     SYSTEM_PROMPT_TEMPLATE_VERSION,
     DOWNLOAD_BEHAVIOR_VERSION,
     DEFAULT_SYSTEM_PROMPT,
-  } from "../../lib/constants.js";
-  import { getActiveProject, updateProject } from "../project-manager.js";
-  import { t, i18n, availableLocaleCodes } from "../../lib/i18n.svelte.js";
-  import { SEARCH_PROVIDER_CATALOG } from "../files/search-reader.js";
-  import { CSS_PRESETS } from "../../lib/constants.js";
-  import { openNativeFilePicker } from "../files/native-file-input.js";
-  import { encryptData, decryptData } from "../../lib/utils/crypto.js";
-  import { makeId } from "../../lib/utils/helpers.js";
-  import SnippetList from "./SnippetList.svelte";
+  } from "../../../lib/constants.js";
+  import { getActiveProject, updateProject } from "../../project-manager.js";
+  import { t, i18n, availableLocaleCodes } from "../../../lib/i18n.svelte.js";
+  import { SEARCH_PROVIDER_CATALOG } from "../../files/search-reader.js";
+  import { CSS_PRESETS } from "../../../lib/constants.js";
+  import { openNativeFilePicker } from "../../files/native-file-input.js";
+  import { encryptData, decryptData } from "../../../lib/utils/crypto.js";
+  import { makeId } from "../../../lib/utils/helpers.js";
+  import SnippetList from "../SnippetList.svelte";
+  import { scrollIntoViewSafe } from "../scroll-into-view.js";
 
   let { onapiplayground, onimportdata, onsave } = $props();
 
@@ -89,7 +91,6 @@
   let showSaveSnippetModal = $state(false);
   let newSnippetName = $state("");
   let saveSnippetError = $state("");
-  let advancedOpen = $state(false);
   let subLanguageOpen = $state(false);
   let subChatOpen = $state(false);
   let subProjectsOpen = $state(false);
@@ -99,17 +100,6 @@
   let subIntegrationsOpen = $state(false);
   let subUtilitiesOpen = $state(false);
   let subCSSOpen = $state(false);
-  let subMcpOpen = $state(false);
-  let showMcpEditor = $state(false);
-  let editingMcp = $state(null);
-  let mcpEditorName = $state("");
-  let mcpEditorUrl = $state("");
-  let mcpEditorApiKey = $state("");
-  let mcpEditorEnabled = $state(true);
-  let mcpEditorIsNew = $state(false);
-  let mcpTestingIndex = $state(-1);
-  let mcpServers = $state([...appState.mcpServers]);
-  let mcpInlineMaxChars = $state(Number(appState.settings.mcpInlineMaxChars) || 8000);
   let disableTipBox = $state(Boolean(appState.settings.disableTipBox));
   let advancedSearchQuery = $state("");
   let autocompleteSelectedIndex = $state(-1);
@@ -219,7 +209,6 @@
       processGitignoreOnUpload, injectSystemDateTime, skipDeletionConfirmation,
       deepResearchDeepFetch,
       searchProviders: enabledSearchProviderIds(),
-      mcpInlineMaxChars,
       locale, syncLocale, collapseLongUserMessages,
       loadAllHistoryOnSession, customCSS, disableTipBox
     });
@@ -598,9 +587,6 @@
       'settings.customCSS', 'settings.cssPresets',
       'settings.saveAsSnippet', 'settings.manageSnippets',
     ]},
-    { key: 'subMcp', labelKey: 'mcp.sectionTitle', settingKeys: [
-      'mcp.addServer', 'mcp.inlineMaxChars',
-    ]},
     { key: 'subUtilities', labelKey: 'settings.subUtilities', settingKeys: [
       'apiPlayground.title', 'drawer.exportAll', 'drawer.importAll', 'settings.disableTipBox',
     ]},
@@ -660,7 +646,6 @@
       subProjects: subProjectsOpen, subInjection: subInjectionOpen,
       subResearch: subResearchOpen, subVoice: subVoiceOpen,
       subIntegrations: subIntegrationsOpen, subCSS: subCSSOpen,
-      subMcp: subMcpOpen,
       subUtilities: subUtilitiesOpen,
     };
   }
@@ -671,7 +656,6 @@
     subProjectsOpen = states.subProjects; subInjectionOpen = states.subInjection;
     subResearchOpen = states.subResearch; subVoiceOpen = states.subVoice;
     subIntegrationsOpen = states.subIntegrations; subCSSOpen = states.subCSS;
-    subMcpOpen = states.subMcp;
     subUtilitiesOpen = states.subUtilities;
   }
 
@@ -695,7 +679,6 @@
     subVoiceOpen = matchingKeys.has('subVoice');
     subIntegrationsOpen = matchingKeys.has('subIntegrations');
     subCSSOpen = matchingKeys.has('subCSS');
-    subMcpOpen = matchingKeys.has('subMcp');
     subUtilitiesOpen = matchingKeys.has('subUtilities');
   });
 
@@ -716,6 +699,29 @@
     const item = autocompleteItems[autocompleteSelectedIndex];
     if (!item) return;
     advancedSearchQuery = item.label;
+    // Selecting a section jumps straight to its card (BDS-UI scrollToSection).
+    if (item.type === 'section') scrollToSection(item.sectionKey);
+  }
+
+  /**
+   * Expands and scrolls to one settings section card. Exposed through the
+   * Drawer/App UI API so other surfaces can deep-link into Advanced Settings
+   * without re-implementing the search-expansion logic.
+   */
+  export function scrollToSection(sectionKey) {
+    if (!sectionKey) return;
+    const toggle = document.querySelector(`[data-bds-section="${sectionKey}"]`);
+    if (!toggle) return;
+    if (searchActive && filteredSearchSections?.length) {
+      const matching = new Set(filteredSearchSections.map((s) => s.sectionKey));
+      if (!matching.has(sectionKey)) {
+        advancedSearchQuery = "";
+      }
+    }
+    toggle.click();
+    requestAnimationFrame(() => {
+      scrollIntoViewSafe(toggle);
+    });
   }
 
   function handleAutocompleteMouseDown(e, index) { e.preventDefault(); autocompleteSelectedIndex = index; selectAutocompleteItem(); }
@@ -764,9 +770,7 @@
     syncLocale = Boolean(appState.settings.syncLocale);
     customCSS = appState.settings.customCSS || "";
     disableTipBox = Boolean(appState.settings.disableTipBox);
-    mcpInlineMaxChars = Number(appState.settings.mcpInlineMaxChars) || 8000;
     cssSnippets = [...appState.cssSnippets];
-    mcpServers = [...appState.mcpServers];
     if (snippetListRef) snippetListRef.refresh();
     chrome.storage.local.get("bds_locale_update_last_checked", (data) => {
       lastCheckedDate = data.bds_locale_update_last_checked || "";
@@ -1004,7 +1008,6 @@
     appState.settings.syncLocale = syncLocale;
     appState.settings.customCSS = customCSS;
     appState.settings.disableTipBox = disableTipBox;
-    appState.settings.mcpInlineMaxChars = Math.max(500, Math.min(100000, Math.round(Number(mcpInlineMaxChars) || 8000)));
 
     await chrome.storage.local.set({
       [STORAGE_KEYS.settings]: JSON.parse(JSON.stringify(appState.settings)),
@@ -1083,102 +1086,6 @@
 
   function baseOnDefault() {
     promptEditorContent = appState.settings.systemPrompt || DEFAULT_SYSTEM_PROMPT;
-  }
-
-  function openMcpEditor(server = null) {
-    if (server) {
-      editingMcp = server;
-      mcpEditorName = server.name;
-      mcpEditorUrl = server.serverUrl;
-      mcpEditorApiKey = server.apiKey || "";
-      mcpEditorEnabled = server.enabled !== false;
-      mcpEditorIsNew = false;
-    } else {
-      editingMcp = null;
-      mcpEditorName = "";
-      mcpEditorUrl = "";
-      mcpEditorApiKey = "";
-      mcpEditorEnabled = true;
-      mcpEditorIsNew = true;
-    }
-    showMcpEditor = true;
-  }
-
-  function closeMcpEditor() {
-    showMcpEditor = false;
-    editingMcp = null;
-  }
-
-  async function saveMcpServer() {
-    if (!mcpEditorName.trim() || !mcpEditorUrl.trim()) return;
-    const entry = {
-      id: editingMcp ? editingMcp.id : "mcp_" + Math.random().toString(36).substring(2, 9),
-      name: mcpEditorName.trim(),
-      serverUrl: mcpEditorUrl.trim(),
-      apiKey: mcpEditorApiKey.trim(),
-      enabled: mcpEditorEnabled,
-      tools: editingMcp ? editingMcp.tools : [],
-      createdAt: editingMcp ? editingMcp.createdAt : Date.now(),
-    };
-    if (mcpEditorIsNew) {
-      mcpServers = [...mcpServers, entry];
-    } else {
-      mcpServers = mcpServers.map(s => s.id === entry.id ? entry : s);
-    }
-    const plain = JSON.parse(JSON.stringify(mcpServers));
-    appState.mcpServers = plain;
-    await chrome.storage.local.set({ [STORAGE_KEYS.mcpServers]: plain });
-    await discoverMcpToolSchemas();
-    pushConfigToPage();
-    closeMcpEditor();
-  }
-
-  async function deleteMcpServer(id) {
-    if (!appState.settings?.skipDeletionConfirmation) {
-      if (!(await appState.ui.showConfirm(t('mcp.deleteConfirm', { name: mcpServers.find(s => s.id === id)?.name })))) return;
-    }
-    mcpServers = mcpServers.filter(s => s.id !== id);
-    const plainDelete = JSON.parse(JSON.stringify(mcpServers));
-    appState.mcpServers = plainDelete;
-    await chrome.storage.local.set({ [STORAGE_KEYS.mcpServers]: plainDelete });
-    await discoverMcpToolSchemas();
-    pushConfigToPage();
-  }
-
-  async function testMcpServer(index) {
-    mcpTestingIndex = index;
-    const server = mcpServers[index];
-    if (!server) { mcpTestingIndex = -1; return; }
-    try {
-      const response = await new Promise((resolve, reject) => {
-        chrome.runtime.sendMessage(
-          { type: "bds-mcp-list-tools", serverUrl: server.serverUrl, apiKey: server.apiKey || "" },
-          (resp) => {
-            if (resp?.ok) resolve(resp);
-            else reject(new Error(resp?.error || "Connection failed"));
-          }
-        );
-      });
-      if (response.ok) {
-        const tools = (Array.isArray(response.tools) ? response.tools : (response.tools?.tools || [])).map(t => ({
-          name: t.name,
-          description: t.description || "",
-          inputSchema: t.inputSchema || {},
-        }));
-        mcpServers = mcpServers.map((s, idx) => idx === index ? { ...s, tools } : s);
-        const plainTest = JSON.parse(JSON.stringify(mcpServers));
-        appState.mcpServers = plainTest;
-        await chrome.storage.local.set({ [STORAGE_KEYS.mcpServers]: plainTest });
-        // Explicit "test connection": bypass the discovery cache so the schema
-        // list reflects the server we just reached rather than a stale entry.
-        await discoverMcpToolSchemas({ force: true });
-        pushConfigToPage();
-        if (appState.ui) appState.ui.showToast(t('mcp.connected', { count: tools.length }));
-      }
-    } catch (err) {
-      if (appState.ui) appState.ui.showToast(t('mcp.testFailed', { message: err.message }));
-    }
-    mcpTestingIndex = -1;
   }
 
   function scheduleLabel(entry) {
@@ -1324,33 +1231,38 @@
   }
 </script>
 
-<div class="bds-section-title">
-  <span class="bds-icon-inline">
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 16 16"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <g clip-path="url(#clip0_1450_63327)">
-        <path
-          d="M14.0861 5.51366C13.8717 5.0575 13.588 4.58542 13.2889 4.18108C13.208 4.07172 13.1596 4.04373 13.0243 4.03054C12.4277 3.97255 11.8245 4.05527 11.2269 3.9972C10.7224 3.94816 10.3133 3.71661 10.0115 3.30919C9.66986 2.84777 9.43973 2.31343 9.09824 1.85234C9.01771 1.74365 8.96805 1.71589 8.83354 1.70282C8.29432 1.65044 7.70402 1.65061 7.16656 1.70282C7.03205 1.71589 6.98239 1.74365 6.90186 1.85234C6.56067 2.31303 6.33025 2.84774 5.98855 3.30919C5.68681 3.71661 5.27774 3.94816 4.77317 3.9972C4.17564 4.05527 3.57239 3.97255 2.97585 4.03054C2.84046 4.04373 2.79208 4.07172 2.71115 4.18108C2.41212 4.58542 2.12835 5.0575 1.91403 5.51366C1.85299 5.64359 1.85286 5.7018 1.91403 5.8319C2.14865 6.33077 2.49748 6.76892 2.73237 7.26854C2.9594 7.7515 2.96041 8.24717 2.73338 8.73044C2.49837 9.23061 2.14891 9.66837 1.91403 10.1681C1.85291 10.2982 1.85299 10.3564 1.91403 10.4863C2.12856 10.9429 2.41185 11.4142 2.71115 11.8189C2.79208 11.9283 2.84046 11.9563 2.97585 11.9694C3.57239 12.0274 4.17564 11.9447 4.77317 12.0028C5.27774 12.0518 5.68681 12.2834 5.98855 12.6908C6.33024 13.1522 6.56037 13.6866 6.90186 14.1476C6.98239 14.2563 7.03205 14.2841 7.16656 14.2972C7.70402 14.3494 8.29432 14.3495 8.83354 14.2972C8.96805 14.2841 9.01771 14.2563 9.09824 14.1476C9.43944 13.687 9.66985 13.1522 10.0115 12.6908C10.3133 12.2834 10.7224 12.0518 11.2269 12.0028C11.8244 11.9447 12.4271 12.0275 13.0243 11.9694C13.1596 11.9563 13.208 11.9283 13.2889 11.8189C13.5891 11.4131 13.872 10.942 14.0861 10.4863C14.1471 10.3564 14.1472 10.2982 14.0861 10.1681C13.8513 9.66861 13.5017 9.23061 13.2667 8.73044C13.0397 8.24717 13.0407 7.7515 13.2677 7.26854C13.5026 6.7689 13.8513 6.33106 14.0861 5.8319C14.1472 5.7018 14.1471 5.64359 14.0861 5.51366ZM15.3035 6.40373C15.0685 6.90359 14.7188 7.34119 14.4841 7.84037C14.4231 7.97025 14.423 8.02855 14.4841 8.15861C14.7189 8.65833 15.0685 9.09611 15.3035 9.59626C15.5308 10.0801 15.5308 10.5744 15.3035 11.0582C15.052 11.5933 14.7225 12.1426 14.37 12.6191C14.0685 13.0265 13.6581 13.259 13.1536 13.3081C12.5566 13.366 11.9541 13.2835 11.3573 13.3414C11.2228 13.3545 11.1731 13.3823 11.0926 13.491C10.7511 13.9521 10.521 14.4864 10.1793 14.9478C9.87828 15.3542 9.46719 15.5869 8.96387 15.6358C8.34008 15.6964 7.66194 15.6966 7.03623 15.6358C6.53291 15.5869 6.12182 15.3542 5.82084 14.9478C5.47911 14.4863 5.24878 13.9517 4.90753 13.491C4.82701 13.3823 4.77734 13.3545 4.64284 13.3414C4.04647 13.2835 3.44373 13.366 2.84653 13.3081C2.34201 13.259 1.93164 13.0265 1.63013 12.6191C1.27867 12.144 0.948453 11.5941 0.696621 11.0582C0.469315 10.5744 0.469279 10.0801 0.696621 9.59626C0.931628 9.09613 1.2813 8.65807 1.51597 8.15861C1.57708 8.02855 1.57702 7.97025 1.51597 7.84037C1.28117 7.34095 0.931635 6.9036 0.696621 6.40373C0.469213 5.91992 0.469367 5.42562 0.696621 4.94183C0.948441 4.40587 1.27868 3.85598 1.63013 3.38092C1.93164 2.97349 2.34201 2.74095 2.84653 2.6919C3.44353 2.63397 4.04599 2.71649 4.64284 2.65856C4.77734 2.64549 4.82701 2.61774 4.90753 2.50904C5.24905 2.04792 5.47913 1.51362 5.82084 1.05219C6.12182 0.645806 6.53291 0.413119 7.03623 0.364178C7.66002 0.303556 8.33816 0.303369 8.96387 0.364178C9.46719 0.413119 9.87828 0.645806 10.1793 1.05219C10.521 1.51365 10.7513 2.04828 11.0926 2.50904C11.1731 2.61774 11.2228 2.64549 11.3573 2.65856C11.9541 2.71649 12.5566 2.63397 13.1536 2.6919C13.6581 2.74095 14.0685 2.97349 14.37 3.38092C14.7214 3.85598 15.0517 4.40587 15.3035 4.94183C15.5307 5.42562 15.5309 5.91992 15.3035 6.40373Z"
-          fill="currentColor"
-        ></path><path
-          d="M9.13764 7.99999C9.13764 7.3715 8.62855 6.8624 8.00005 6.8624C7.37155 6.8624 6.86246 7.3715 6.86246 7.99999C6.86246 8.62849 7.37155 9.13759 8.00005 9.13759C8.62855 9.13759 9.13764 8.62849 9.13764 7.99999ZM10.4834 7.99999C10.4834 9.37126 9.37132 10.4833 8.00005 10.4833C6.62878 10.4833 5.51674 9.37126 5.51674 7.99999C5.51674 6.62873 6.62878 5.51669 8.00005 5.51669C9.37132 5.51669 10.4834 6.62873 10.4834 7.99999Z"
-          fill="currentColor"
-        ></path>
-      </g>
-      <defs
-        ><clipPath id="clip0_1450_63327"
-          ><rect width="16" height="16" fill="currentColor"></rect></clipPath
-        ></defs
+<!--
+  Advanced Settings (BDS-UI F.6): own component, own state, own UI. Everything
+  that used to live in the monolithic SettingsPanel.svelte except the MCP
+  servers area — MCP servers are owned by PluginsSettings.svelte.
+
+  Layout/visual language: premium, mobile-first dark (BDS-UI F.7).
+-->
+<div class="bds-settings-shell bds-settings-shell--advanced" id="bds-settings-advanced">
+  <header class="bds-settings-hero">
+    <span class="bds-settings-hero-icon" aria-hidden="true">
+      <svg
+        width="20"
+        height="20"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.9"
+        stroke-linecap="round"
+        stroke-linejoin="round"
       >
-    </svg>
-  </span>
-  {t('settings.generalSettings')}
-</div>
+        <circle cx="12" cy="12" r="3.2"></circle>
+        <path
+          d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6h.09A1.65 1.65 0 0 0 10 3.09V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+        ></path>
+      </svg>
+    </span>
+    <span class="bds-settings-hero-text">
+      <span class="bds-settings-hero-title">{t('settings.advancedSettings')}</span>
+      <span class="bds-settings-hero-sub">{t('settings.generalSettings')}</span>
+    </span>
+    <span class="bds-settings-badge">BDS</span>
+  </header>
 
 <div class="bds-section-title">
   <label class="bds-label">{t('settings.systemPrompts')}</label>
@@ -1530,34 +1442,7 @@
   <p style="font-size: 10px; opacity: 0.5; margin: 2px 0 12px;">{t('settings.autoSaved')}</p>
 {/if}
 
-<button
-  type="button"
-  class="bds-advanced-toggle"
-  class:open={advancedOpen}
-  onclick={() => (advancedOpen = !advancedOpen)}
->
-  {t('settings.advancedSettings')}
-  <span class="bds-chevron">
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 16 16"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <path
-        d="M4 6L8 10L12 6"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      />
-    </svg>
-  </span>
-</button>
-
-<div class="bds-advanced-content" class:open={advancedOpen}>
-  {#if advancedOpen}
+  <div class="bds-advanced-content bds-open">
     <div class="bds-advanced-search-wrapper">
       <div class="bds-advanced-search-input-wrapper">
         <svg class="bds-advanced-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1593,11 +1478,11 @@
         <div class="bds-advanced-no-results">{t('settings.advancedNoResults')}</div>
       {/if}
     </div>
-  {/if}
-  <div class="bds-advanced-inner">
+
+    <div class="bds-advanced-inner">
     <!-- Each sub-section visibility is controlled by isSectionMatch() when search is active -->
     {#if isSectionMatch('subLanguage')}
-    <button type="button" class="bds-sub-toggle" class:open={subLanguageOpen} onclick={() => subLanguageOpen = !subLanguageOpen} aria-expanded={subLanguageOpen}>
+    <button type="button" class="bds-sub-toggle" class:open={subLanguageOpen} data-bds-section="subLanguage" onclick={() => subLanguageOpen = !subLanguageOpen} aria-expanded={subLanguageOpen}>
       {t('settings.subLanguage')}
       <span class="bds-chevron">
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -1654,7 +1539,7 @@
     {/if}
 
     {#if isSectionMatch('subChat')}
-    <button type="button" class="bds-sub-toggle" class:open={subChatOpen} onclick={() => subChatOpen = !subChatOpen} aria-expanded={subChatOpen}>
+    <button type="button" class="bds-sub-toggle" class:open={subChatOpen} data-bds-section="subChat" onclick={() => subChatOpen = !subChatOpen} aria-expanded={subChatOpen}>
       {t('settings.subChat')}
       <span class="bds-chevron">
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -1697,7 +1582,7 @@
     {/if}
 
     {#if isSectionMatch('subProjects')}
-    <button type="button" class="bds-sub-toggle" class:open={subProjectsOpen} onclick={() => subProjectsOpen = !subProjectsOpen} aria-expanded={subProjectsOpen}>
+    <button type="button" class="bds-sub-toggle" class:open={subProjectsOpen} data-bds-section="subProjects" onclick={() => subProjectsOpen = !subProjectsOpen} aria-expanded={subProjectsOpen}>
       {t('settings.subProjects')}
       <span class="bds-chevron">
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -1758,7 +1643,7 @@
     {/if}
 
     {#if isSectionMatch('subInjection')}
-    <button type="button" class="bds-sub-toggle" class:open={subInjectionOpen} onclick={() => subInjectionOpen = !subInjectionOpen} aria-expanded={subInjectionOpen}>
+    <button type="button" class="bds-sub-toggle" class:open={subInjectionOpen} data-bds-section="subInjection" onclick={() => subInjectionOpen = !subInjectionOpen} aria-expanded={subInjectionOpen}>
       {t('settings.subInjection')}
       <span class="bds-chevron">
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -1823,7 +1708,7 @@
     {/if}
 
     {#if isSectionMatch('subResearch')}
-    <button type="button" class="bds-sub-toggle" class:open={subResearchOpen} onclick={() => subResearchOpen = !subResearchOpen} aria-expanded={subResearchOpen}>
+    <button type="button" class="bds-sub-toggle" class:open={subResearchOpen} data-bds-section="subResearch" onclick={() => subResearchOpen = !subResearchOpen} aria-expanded={subResearchOpen}>
       {t('settings.subResearch')}
       <span class="bds-chevron">
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -1917,7 +1802,7 @@
     {/if}
 
     {#if isSectionMatch('subVoice')}
-    <button type="button" class="bds-sub-toggle" class:open={subVoiceOpen} onclick={() => subVoiceOpen = !subVoiceOpen} aria-expanded={subVoiceOpen}>
+    <button type="button" class="bds-sub-toggle" class:open={subVoiceOpen} data-bds-section="subVoice" onclick={() => subVoiceOpen = !subVoiceOpen} aria-expanded={subVoiceOpen}>
       {t('settings.subVoice')}
       <span class="bds-chevron">
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -1971,7 +1856,7 @@
     {/if}
 
     {#if isSectionMatch('subIntegrations')}
-    <button type="button" class="bds-sub-toggle" class:open={subIntegrationsOpen} onclick={() => subIntegrationsOpen = !subIntegrationsOpen} aria-expanded={subIntegrationsOpen}>
+    <button type="button" class="bds-sub-toggle" class:open={subIntegrationsOpen} data-bds-section="subIntegrations" onclick={() => subIntegrationsOpen = !subIntegrationsOpen} aria-expanded={subIntegrationsOpen}>
       {t('settings.subIntegrations')}
       <span class="bds-chevron">
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -2033,7 +1918,7 @@
     {/if}
 
     {#if isSectionMatch('subCSS')}
-    <button type="button" class="bds-sub-toggle" class:open={subCSSOpen} onclick={() => subCSSOpen = !subCSSOpen} aria-expanded={subCSSOpen}>
+    <button type="button" class="bds-sub-toggle" class:open={subCSSOpen} data-bds-section="subCSS" onclick={() => subCSSOpen = !subCSSOpen} aria-expanded={subCSSOpen}>
       {t('settings.subCSS')}
       <span class="bds-chevron">
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -2087,54 +1972,8 @@
     </div>
     {/if}
 
-    {#if isSectionMatch('subMcp')}
-    <button type="button" class="bds-sub-toggle" class:open={subMcpOpen} onclick={() => subMcpOpen = !subMcpOpen} aria-expanded={subMcpOpen}>
-      {t('mcp.sectionTitle')}
-      <span class="bds-chevron">
-        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-      </span>
-    </button>
-    <div class="bds-sub-content" class:open={subMcpOpen}>
-      <div class="bds-sub-inner">
-        <p style="font-size: 11px; opacity: 0.6; margin: 0 0 8px;">{t('mcp.description')}</p>
-        <p style="font-size: 10px; opacity: 0.5; margin: -4px 0 8px;">{t('mcp.transportNote')}</p>
-        {#each mcpServers as server, i}
-          <div class="bds-skill-item">
-            <div class="bds-prompt-info">
-              <span class="bds-prompt-name">{server.name}</span>
-              <span class="bds-prompt-status">{server.serverUrl} · {t('mcp.toolsCount', { count: server.tools?.length || 0 })}</span>
-            </div>
-            <div class="bds-prompt-actions">
-              <button class="bds-btn-outlined" style="font-size: 11px; padding: 4px 8px;" onclick={() => testMcpServer(i)} disabled={mcpTestingIndex === i}>
-                {mcpTestingIndex === i ? t('mcp.testLoading') : t('mcp.test')}
-              </button>
-              <button class="bds-btn-outlined" style="font-size: 11px; padding: 4px 8px;" onclick={() => openMcpEditor(server)}>{t('mcp.edit')}</button>
-              <button class="bds-btn-danger" onclick={() => deleteMcpServer(server.id)}>×</button>
-            </div>
-          </div>
-        {/each}
-        <button class="bds-add-prompt-btn" onclick={() => openMcpEditor()}>
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="margin-right: 4px;"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-          {t('mcp.addServer')}
-        </button>
-
-        <div class="bds-toggle-row" style="flex-direction: column; align-items: flex-start; gap: 6px; margin-top: 12px;">
-          <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 12px; min-width: 0; box-sizing: border-box;">
-            <span class="bds-toggle-label">{t('mcp.inlineMaxChars')}</span>
-            <input id="bds-mcp-inline-max-chars" type="number" min="500" max="100000" step="500" class="bds-input" style="width: 100px; flex-shrink: 0; box-sizing: border-box;" bind:value={mcpInlineMaxChars} />
-          </div>
-          <p style="font-size: 10px; opacity: 0.5; margin: 0; width: 100%; box-sizing: border-box;">
-            {t('mcp.inlineMaxCharsHint')}
-          </p>
-        </div>
-      </div>
-    </div>
-    {/if}
-
     {#if isSectionMatch('subUtilities')}
-    <button type="button" class="bds-sub-toggle" class:open={subUtilitiesOpen} onclick={() => subUtilitiesOpen = !subUtilitiesOpen} aria-expanded={subUtilitiesOpen}>
+    <button type="button" class="bds-sub-toggle" class:open={subUtilitiesOpen} data-bds-section="subUtilities" onclick={() => subUtilitiesOpen = !subUtilitiesOpen} aria-expanded={subUtilitiesOpen}>
       {t('settings.subUtilities')}
       <span class="bds-chevron">
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -2175,8 +2014,8 @@
       </div>
     </div>
     {/if}
+    </div>
   </div>
-</div>
 
 {#if showUnsavedModal}
   <div class="bds-modal-overlay">
@@ -2309,538 +2148,4 @@
     </div>
   </div>
 {/if}
-
-{#if showMcpEditor}
-  <div class="bds-modal-overlay">
-    <div class="bds-modal">
-      <div class="bds-modal-header">
-        <span>{mcpEditorIsNew ? t('mcp.addModalTitle') : t('mcp.editModalTitle')}</span>
-        <button class="bds-modal-close" onclick={closeMcpEditor}>×</button>
-      </div>
-      <div class="bds-modal-body">
-        <div class="bds-field">
-          <label class="bds-label">{t('mcp.nameLabel')}</label>
-          <input type="text" class="bds-input" bind:value={mcpEditorName} placeholder={t('mcp.namePlaceholder')} />
-        </div>
-        <div class="bds-field">
-          <label class="bds-label">{t('mcp.serverUrlLabel')}</label>
-          <input type="url" class="bds-input" bind:value={mcpEditorUrl} placeholder={t('mcp.serverUrlPlaceholder')} />
-        </div>
-        <div class="bds-field">
-          <label class="bds-label">{t('mcp.apiKeyLabel')}</label>
-          <input type="password" class="bds-input" bind:value={mcpEditorApiKey} placeholder={t('mcp.apiKeyPlaceholder')} />
-        </div>
-        <div class="bds-toggle-row" style="padding: 0;">
-          <span class="bds-toggle-label">{t('mcp.enabledLabel')}</span>
-          <label class="bds-switch">
-            <input type="checkbox" bind:checked={mcpEditorEnabled} />
-            <span class="bds-switch-track"></span>
-          </label>
-        </div>
-      </div>
-      <div class="bds-modal-footer">
-        <button class="bds-btn-outlined" onclick={closeMcpEditor}>{t('mcp.cancel')}</button>
-        <button class="bds-btn" onclick={saveMcpServer} disabled={!mcpEditorName.trim() || !mcpEditorUrl.trim()}>{t('mcp.save')}</button>
-      </div>
-    </div>
-  </div>
-{/if}
-
-<style>
-  .bds-css-editor {
-    border-bottom-left-radius: 0 !important;
-    border-bottom-right-radius: 0 !important;
-    margin-bottom: 0 !important;
-    border-bottom: none !important;
-  }
-
-  .bds-css-toolbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    padding: 6px 10px;
-    background: var(--bds-bg-elevated);
-    border: 1px solid var(--bds-border);
-    border-top: none;
-    border-bottom-left-radius: 8px;
-    border-bottom-right-radius: 8px;
-    transition: border-radius var(--bds-transition);
-  }
-
-  .bds-css-toolbar.open {
-    border-bottom-left-radius: 0;
-    border-bottom-right-radius: 0;
-  }
-
-  .bds-css-toggle-btn {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    background: none;
-    border: 1px solid var(--bds-border);
-    border-radius: 6px;
-    color: var(--bds-text-secondary);
-    padding: 4px 8px;
-    font-size: 11px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all var(--bds-transition);
-    min-width: 0;
-    flex-shrink: 1;
-    overflow: hidden;
-  }
-
-  .bds-css-toggle-btn span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .bds-css-toggle-btn:hover, .bds-css-toggle-btn.active {
-    background: var(--bds-bg-hover);
-    border-color: var(--bds-accent);
-    color: var(--bds-text-primary);
-  }
-
-  .bds-snippets-icon {
-    color: var(--bds-accent);
-  }
-
-  .bds-snippets-badge {
-    background: var(--bds-accent);
-    color: #ffffff;
-    font-size: 10px;
-    padding: 1px 6px;
-    border-radius: 10px;
-    font-weight: bold;
-    line-height: 1.2;
-  }
-
-  .bds-chevron {
-    transition: transform var(--bds-transition);
-    opacity: 0.6;
-  }
-
-  .bds-chevron-rotated {
-    transform: rotate(180deg);
-  }
-
-  .bds-save-snippet-btn {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 11px !important;
-    padding: 4px 8px !important;
-    cursor: pointer;
-  }
-
-  .bds-lang-btn-group {
-    display: flex;
-    gap: 8px;
-    width: 100%;
-    flex-wrap: wrap;
-    box-sizing: border-box;
-  }
-
-  .bds-lang-btn {
-    flex: 1 1 120px;
-    min-width: 0;
-    font-size: 11px;
-    padding: 6px 8px;
-    text-align: center;
-    white-space: normal;
-    word-break: break-word;
-    box-sizing: border-box;
-  }
-
-  .bds-lang-reset-btn {
-    border-color: rgba(239, 68, 68, 0.3);
-    color: rgba(239, 68, 68, 0.8);
-  }
-
-  .bds-token-field {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-    box-sizing: border-box;
-    min-width: 0;
-  }
-
-  .bds-token-actions {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-shrink: 0;
-    flex-wrap: wrap;
-    min-width: 0;
-  }
-
-  .bds-token-btn {
-    min-width: 0;
-    padding-inline: 8px;
-  }
-
-  .bds-token-btn:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-
-  .bds-token-text[readonly] {
-    cursor: default;
-  }
-
-  .bds-token-help {
-    margin: 0;
-    font-size: 10px;
-    opacity: 0.6;
-    line-height: 1.45;
-  }
-
-  .bds-token-help code {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 0.95em;
-  }
-
-  .bds-prompt-info {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    min-width: 0;
-  }
-
-  .bds-prompt-name {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--bds-text-primary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    display: block;
-    width: 100%;
-  }
-
-  .bds-prompt-status {
-    font-size: 11px;
-    color: var(--bds-text-tertiary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    display: block;
-    width: 100%;
-  }
-
-  .bds-prompt-actions {
-    display: flex;
-    gap: 6px;
-    align-items: center;
-    flex-shrink: 0;
-  }
-
-  .bds-add-prompt-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 10px;
-    background: transparent;
-    border: 1px dashed var(--bds-border);
-    border-radius: 10px;
-    color: var(--bds-text-secondary);
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all var(--bds-transition);
-    margin-top: 4px;
-  }
-
-  .bds-add-prompt-btn:hover {
-    border-color: var(--bds-accent);
-    color: var(--bds-accent);
-    background: var(--bds-accent-glow);
-  }
-
-  /* Modal Overrides for DeepSeek Aesthetics */
-  .bds-modal-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.4);
-    backdrop-filter: blur(4px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 2147483647;
-    padding: 20px;
-  }
-
-  .bds-modal {
-    background: var(--bds-bg-panel);
-    border: 1px solid var(--bds-border);
-    border-radius: 16px;
-    width: 100%;
-    max-width: 540px;
-    max-height: 90vh;
-    display: flex;
-    flex-direction: column;
-    box-shadow: var(--bds-shadow);
-  }
-
-  .bds-modal-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 20px 24px;
-    border-bottom: 1px solid var(--bds-border);
-  }
-
-  .bds-modal-close {
-    background: transparent;
-    border: none;
-    color: var(--bds-text-tertiary);
-    font-size: 24px;
-    cursor: pointer;
-    padding: 0;
-    line-height: 1;
-  }
-
-  .bds-modal-close:hover {
-    color: var(--bds-text-primary);
-  }
-
-  .bds-modal-body {
-    padding: 24px;
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-    overflow-y: auto;
-    overflow-x: hidden;
-  }
-
-  .bds-field {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .bds-modal-footer {
-    padding: 16px 24px;
-    border-top: 1px solid var(--bds-border);
-    display: flex;
-    justify-content: flex-end;
-    gap: 12px;
-  }
-
-  .bds-css-editor {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace !important;
-    font-size: 12px !important;
-    line-height: 1.5 !important;
-    min-height: 200px !important;
-    tab-size: 2 !important;
-    resize: vertical !important;
-    background: var(--bds-bg-input) !important;
-    color: var(--bds-text-primary) !important;
-    border: 1px solid var(--bds-border) !important;
-    border-radius: 8px !important;
-    padding: 12px !important;
-    white-space: pre !important;
-    overflow: auto !important;
-  }
-
-  @media (max-width: 560px) {
-    .bds-token-field {
-      flex-direction: column;
-      align-items: stretch;
-    }
-
-    .bds-token-actions {
-      justify-content: flex-end;
-    }
-  }
-
-  .bds-export-section {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin-top: 8px;
-  }
-
-  .bds-export-section > span {
-    font-size: 12px;
-    font-weight: 600;
-    opacity: 0.7;
-  }
-
-  .bds-export-buttons {
-    display: flex;
-    gap: 6px;
-  }
-
-  .bds-export-buttons button {
-    flex: 1;
-    font-size: 11px;
-    padding: 6px 12px;
-  }
-
-  .bds-modal-check {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    cursor: pointer;
-    user-select: none;
-    font-size: 13px;
-  }
-
-  .bds-modal-check input[type="checkbox"] {
-    margin: 0;
-  }
-
-  .bds-modal-error {
-    color: #e74c3c;
-    font-size: 11px;
-  }
-
-  .bds-editing-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    background: var(--bds-accent-glow);
-    border: 1px solid var(--bds-accent);
-    color: var(--bds-text-primary);
-    padding: 2px 8px;
-    border-radius: 6px;
-    font-size: 11px;
-    font-weight: 500;
-  }
-
-  .bds-exit-edit-btn {
-    background: none;
-    border: none;
-    padding: 0;
-    color: var(--bds-accent);
-    cursor: pointer;
-    font-size: 11px;
-    font-weight: 600;
-    display: inline-flex;
-    align-items: center;
-    transition: opacity var(--bds-transition);
-  }
-
-  .bds-exit-edit-btn:hover {
-    opacity: 0.8;
-  }
-
-  .bds-slider-group {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex: 1;
-    max-width: 140px;
-  }
-
-  .bds-slider {
-    flex: 1;
-    height: 4px;
-    appearance: none;
-    background: var(--bds-border);
-    border-radius: 2px;
-    outline: none;
-    cursor: pointer;
-  }
-
-  .bds-slider::-webkit-slider-thumb {
-    appearance: none;
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: var(--bds-accent);
-    border: 2px solid var(--bds-bg-panel);
-    cursor: pointer;
-    transition: transform 0.1s ease;
-  }
-
-  .bds-slider::-webkit-slider-thumb:hover {
-    transform: scale(1.15);
-  }
-
-  .bds-slider::-moz-range-thumb {
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: var(--bds-accent);
-    border: 2px solid var(--bds-bg-panel);
-    cursor: pointer;
-  }
-
-  .bds-slider-value {
-    font-size: 13px;
-    font-weight: 600;
-    min-width: 40px;
-    text-align: right;
-    color: var(--bds-text-primary);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .bds-search-provider-list {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    width: 100%;
-    box-sizing: border-box;
-  }
-
-  .bds-search-provider-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 4px 6px;
-    border-radius: 6px;
-    background: var(--bds-bg-hover, rgba(128, 128, 128, 0.08));
-  }
-
-  .bds-search-provider-label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12px;
-    color: var(--bds-text-primary);
-    cursor: pointer;
-    min-width: 0;
-  }
-
-  .bds-search-provider-label input {
-    margin: 0;
-    accent-color: var(--bds-accent);
-  }
-
-  .bds-search-provider-controls {
-    display: flex;
-    gap: 4px;
-  }
-
-  .bds-search-provider-move {
-    width: 22px;
-    height: 22px;
-    padding: 0;
-    border: 1px solid var(--bds-border, rgba(128, 128, 128, 0.25));
-    border-radius: 5px;
-    background: transparent;
-    color: var(--bds-text-primary);
-    font-size: 11px;
-    line-height: 1;
-    cursor: pointer;
-  }
-
-  .bds-search-provider-move:hover:not(:disabled) {
-    background: var(--bds-accent);
-    color: #fff;
-    border-color: var(--bds-accent);
-  }
-
-  .bds-search-provider-move:disabled {
-    opacity: 0.35;
-    cursor: default;
-  }
-</style>
+</div>

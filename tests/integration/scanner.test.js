@@ -77,7 +77,7 @@ describe("scanner input controls", () => {
     document.body.innerHTML = "";
   });
 
-  it("mounts Deep Research before the attach menu when the composer was already partially mounted", async () => {
+  it("mounts the Plus button first and Deep Research after the natives when the composer was partially mounted", async () => {
     document.body.innerHTML = `
       <div id="composer" data-bds-attach-menu-mounted="true">
         <div role="button" tabindex="0"></div>
@@ -98,14 +98,15 @@ describe("scanner input controls", () => {
     const children = Array.from(wrapper.children);
 
     expect(deepResearchMount).toBeTruthy();
-    expect(children.indexOf(deepResearchMount)).toBeLessThan(children.indexOf(attachMount));
-    expect(children.indexOf(deepResearchMount)).toBeLessThan(children.indexOf(fileInput));
+    // BDS-UI E.1: the Plus button owns slot 1, Deep Research must never jump in
+    // front of the native Deep Think / Web Search toggles.
+    expect(children.indexOf(attachMount)).toBeLessThan(children.indexOf(deepResearchMount));
     expect(deepResearchMount.dataset.bdsMounted).toBe("1");
     expect(mountMock.mock.calls[0][0]).toBe(deepResearchToggleMock);
     expect(mountMock.mock.calls[0][1].target).toBe(deepResearchMount);
   });
 
-  it("does not mount Deep Code when target is Android", async () => {
+  it("does not mount Deep Code on the Android target either", async () => {
     process.env.BDS_TARGET = "android";
     document.body.innerHTML = `
       <div id="composer">
@@ -195,12 +196,68 @@ describe("scanner input controls", () => {
     const children = Array.from(promptActions.children);
 
     expect(deepResearchMount).toBeTruthy();
-    expect(children.indexOf(deepResearchMount)).toBeLessThan(
+    // BDS-UI E.1 slot order: Plus → Deep Think (native) → Deep Research → Send.
+    expect(children.indexOf(deepResearchMount)).toBeGreaterThan(
       children.indexOf(document.querySelector("#deepthink")),
     );
+    // The send cluster lives outside the action row in this layout, so Deep
+    // Research simply trails the native toggles (the dedicated ordering test
+    // covers the anchor-before-send behaviour).
     expect(sendCluster.querySelector(".bds-deep-research-mount")).toBeNull();
     expect(document.querySelector(".bds-attach-menu-mount")).toBeNull();
     expect(mountMock.mock.calls[0][0]).toBe(deepResearchToggleMock);
+  });
+
+  it("never mounts a Deep Code icon into the composer action row", async () => {
+    document.body.innerHTML = `
+      <div id="composer">
+        <textarea id="chat-input" placeholder="Message DeepSeek"></textarea>
+        <div id="prompt-actions">
+          <button id="deepthink" type="button">DeepThink</button>
+          <div id="send-cluster">
+            <button id="send" title="Send message" type="button"></button>
+          </div>
+        </div>
+      </div>
+    `;
+    const { scanInputArea } = await import("../../src/content/scanner.js");
+
+    scanInputArea();
+
+    // BDS-UI E.1 locks the composer to five icons; DeepCode lives in the drawer.
+    expect(document.querySelector(".bds-deep-code-mount")).toBeNull();
+  });
+
+  it("orders the composer row as Plus, native toggles, Deep Research, Send", async () => {
+    document.body.innerHTML = `
+      <div id="composer">
+        <textarea id="chat-input" placeholder="Message DeepSeek"></textarea>
+        <div id="prompt-actions">
+          <button id="native-upload" type="button"></button>
+          <input type="file" multiple />
+          <button id="deepthink" type="button">DeepThink</button>
+          <button id="websearch" type="button">Search</button>
+          <div id="send-cluster">
+            <button id="send" title="Send message" type="button"></button>
+          </div>
+        </div>
+      </div>
+    `;
+    const { scanInputArea } = await import("../../src/content/scanner.js");
+
+    scanInputArea();
+
+    const row = document.querySelector("#prompt-actions");
+    const order = Array.from(row.children).map((child) => {
+      if (child.classList.contains("bds-attach-menu-mount")) return "plus";
+      if (child.classList.contains("bds-deep-research-mount")) return "deep-research";
+      if (child.id === "deepthink") return "deep-think";
+      if (child.id === "websearch") return "web-search";
+      if (child.id === "send-cluster") return "send";
+      return "other";
+    }).filter((entry) => entry !== "other");
+
+    expect(order).toEqual(["plus", "deep-think", "web-search", "deep-research", "send"]);
   });
 
   it("does not reinsert the Deep Research mount when rescanning an unchanged action row", async () => {
@@ -247,7 +304,11 @@ describe("scanner input controls", () => {
 
     expect(deepResearchMount).toBeTruthy();
     expect(sendCluster.querySelector(".bds-deep-research-mount")).toBeNull();
-    expect(sendCluster.querySelector(".bds-attach-menu-mount")).toBeTruthy();
+    // BDS-UI E.1: the Plus button is hoisted into the action row's left-most
+    // slot (where the hidden native upload trigger sat), not into the send
+    // cluster, so it can never displace the send button.
+    expect(actionRow.querySelector(":scope > .bds-attach-menu-mount")).toBeTruthy();
+    expect(sendCluster.querySelector(".bds-attach-menu-mount")).toBeNull();
     expect(document.querySelector("#native-upload").style.display).toBe("none");
   });
 

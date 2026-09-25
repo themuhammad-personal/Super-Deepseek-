@@ -37,6 +37,22 @@ function buildDropdownMenu() {
   return menu;
 }
 
+function buildDropdownMenuInto(parent) {
+  const menu = document.createElement("div");
+  menu.className = "ds-dropdown-menu";
+  for (const text of ["Rename", "Delete"]) {
+    const opt = document.createElement("div");
+    opt.className = "ds-dropdown-menu-option";
+    const label = document.createElement("div");
+    label.className = "ds-dropdown-menu-option__label";
+    label.textContent = text;
+    opt.appendChild(label);
+    menu.appendChild(opt);
+  }
+  parent.appendChild(menu);
+  return menu;
+}
+
 function buildSettingsDrawerMenu(labelText) {
   const menu = document.createElement("div");
   menu.className = "ds-dropdown-menu";
@@ -202,96 +218,104 @@ describe("SidebarMenuInjector", () => {
       expect(menu.querySelectorAll(".bds-export-option")).toHaveLength(1);
     });
 
-    it("injects into nested .ds-dropdown-menu added as child of another node", async () => {
+    it("injects into a nested chat .ds-dropdown-menu added as child of another node", async () => {
       const wrapper = document.createElement("div");
-      const menu = document.createElement("div");
-      menu.className = "ds-dropdown-menu";
-      wrapper.appendChild(menu);
+      const menu = buildDropdownMenuInto(wrapper);
       document.body.appendChild(wrapper);
 
       await vi.waitFor(() => expect(menu.querySelector(".bds-export-option")).not.toBeNull());
     });
+
+    it("never injects chat entries into an account menu (BDS-UI F.5/D.6)", async () => {
+      const menu = buildSettingsDrawerMenu("Get App");
+
+      await vi.waitFor(() => expect(menu.querySelector(".bds-plugins-option")).not.toBeNull());
+      await new Promise((r) => setTimeout(r, 150));
+
+      expect(menu.querySelector(".bds-tags-option")).toBeNull();
+      expect(menu.querySelector(".bds-export-option")).toBeNull();
+    });
   });
 
-  describe("settings drawer injection", () => {
-    it("injects Get BDS App and What's New options when menu contains 'Get App'", async () => {
+  describe("account menu injection (BDS-UI F.5)", () => {
+    it("injects Plugins and Advanced Settings before the native Settings item", async () => {
       const menu = buildSettingsDrawerMenu("Get App");
-      await vi.waitFor(() => expect(menu.querySelector(".bds-whats-new-option")).not.toBeNull());
+      await vi.waitFor(() => expect(menu.querySelector(".bds-plugins-option")).not.toBeNull());
 
-      const options = menu.querySelectorAll(".ds-dropdown-menu-option");
-      const labels = Array.from(options).map((o) =>
+      const labels = Array.from(menu.querySelectorAll(".ds-dropdown-menu-option")).map((o) =>
         o.querySelector(".ds-dropdown-menu-option__label")?.textContent.trim()
       );
-      const getAppIdx = labels.indexOf("Get App");
-      const bdsIdx = labels.indexOf("Get BDS App");
-      const wnIdx = labels.indexOf("What's New?");
-      expect(getAppIdx).toBeGreaterThanOrEqual(0);
-      expect(bdsIdx).toBe(getAppIdx + 1);
-      expect(wnIdx).toBe(bdsIdx + 1);
+
+      const settingsIdx = labels.indexOf("Settings");
+      const advancedIdx = labels.indexOf("Advanced Settings");
+      const pluginsIdx = labels.indexOf("Plugins");
+      expect(pluginsIdx).toBe(0);
+      expect(advancedIdx).toBe(1);
+      expect(settingsIdx).toBe(2);
+      // Official Settings and Log out stay native and untouched.
+      expect(labels).toContain("Settings");
+      expect(labels).toContain("Log out");
     });
 
-    it("injects Get BDS App and What's New options when menu contains 'Download mobile App'", async () => {
+    it("no longer injects Get BDS App or What's New (relocated to the drawer footer)", async () => {
       const menu = buildSettingsDrawerMenu("Download mobile App");
-      await vi.waitFor(() => expect(menu.querySelector(".bds-whats-new-option")).not.toBeNull());
+      await vi.waitFor(() => expect(menu.querySelector(".bds-plugins-option")).not.toBeNull());
+      await new Promise((r) => setTimeout(r, 120));
 
-      const options = menu.querySelectorAll(".ds-dropdown-menu-option");
-      const labels = Array.from(options).map((o) =>
-        o.querySelector(".ds-dropdown-menu-option__label")?.textContent.trim()
-      );
-      const targetIdx = labels.indexOf("Download mobile App");
-      const bdsIdx = labels.indexOf("Get BDS App");
-      const wnIdx = labels.indexOf("What's New?");
-      expect(bdsIdx).toBe(targetIdx + 1);
-      expect(wnIdx).toBe(bdsIdx + 1);
-    });
-
-    it("does not inject settings options into chat context menus (no target text)", async () => {
-      const menu = buildDropdownMenu();
-      await vi.waitFor(() => expect(menu.querySelector(".bds-export-option")).not.toBeNull());
-      await new Promise((r) => setTimeout(r, 100));
       expect(menu.querySelector(".bds-get-app-option")).toBeNull();
       expect(menu.querySelector(".bds-whats-new-option")).toBeNull();
     });
 
-    it("does not inject settings options twice", async () => {
+    it("does not inject account options into chat context menus", async () => {
+      const menu = buildDropdownMenu();
+      await vi.waitFor(() => expect(menu.querySelector(".bds-export-option")).not.toBeNull());
+      await new Promise((r) => setTimeout(r, 120));
+
+      expect(menu.querySelector(".bds-plugins-option")).toBeNull();
+      expect(menu.querySelector(".bds-advanced-settings-option")).toBeNull();
+    });
+
+    it("does not inject account options twice", async () => {
       const menu = buildSettingsDrawerMenu("Get App");
-      await vi.waitFor(() => expect(menu.querySelector(".bds-whats-new-option")).not.toBeNull());
+      await vi.waitFor(() => expect(menu.querySelector(".bds-plugins-option")).not.toBeNull());
 
       document.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await new Promise((r) => setTimeout(r, 150));
 
-      expect(menu.querySelectorAll(".bds-get-app-option")).toHaveLength(1);
-      expect(menu.querySelectorAll(".bds-whats-new-option")).toHaveLength(1);
+      expect(menu.querySelectorAll(".bds-plugins-option")).toHaveLength(1);
+      expect(menu.querySelectorAll(".bds-advanced-settings-option")).toHaveLength(1);
     });
 
-    it("opens GitHub releases URL when Get BDS App is clicked", async () => {
-      const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
-
-      const menu = buildSettingsDrawerMenu("Get App");
-      await vi.waitFor(() => expect(menu.querySelector(".bds-get-app-option")).not.toBeNull());
-
-      menu.querySelector(".bds-get-app-option").click();
-
-      expect(openSpy).toHaveBeenCalledWith(
-        "https://github.com/EdgeTypE/better-deepseek/releases",
-        "_blank"
-      );
-      openSpy.mockRestore();
-    });
-
-    it("triggers What's New modal when What's New option is clicked", async () => {
-      const menu = buildSettingsDrawerMenu("Get App");
-      await vi.waitFor(() => expect(menu.querySelector(".bds-whats-new-option")).not.toBeNull());
-
-      // Import the real state module to check its value
+    it("opens the drawer plugins section when Plugins is clicked", async () => {
       const stateModule = await import("../../../src/content/state.js");
       const appState = stateModule.default;
-      appState.ui = { refreshWhatsNew: vi.fn(), showConfirm: vi.fn(() => Promise.resolve(true)) };
+      const openDrawerSection = vi.fn();
+      appState.ui = { openDrawerSection, showConfirm: vi.fn(() => Promise.resolve(true)) };
 
-      menu.querySelector(".bds-whats-new-option").click();
+      const menu = buildSettingsDrawerMenu("Get App");
+      await vi.waitFor(() => expect(menu.querySelector(".bds-plugins-option")).not.toBeNull());
 
-      expect(appState.whatsNewPending).toBe(true);
-      expect(appState.ui.refreshWhatsNew).toHaveBeenCalledOnce();
+      menu.querySelector(".bds-plugins-option").click();
+      await new Promise((r) => setTimeout(r, 80));
+
+      expect(openDrawerSection).toHaveBeenCalledWith("plugins");
+    });
+
+    it("opens the drawer advanced section when Advanced Settings is clicked", async () => {
+      const stateModule = await import("../../../src/content/state.js");
+      const appState = stateModule.default;
+      const openDrawerSection = vi.fn();
+      appState.ui = { openDrawerSection, showConfirm: vi.fn(() => Promise.resolve(true)) };
+
+      const menu = buildSettingsDrawerMenu("Get App");
+      await vi.waitFor(() =>
+        expect(menu.querySelector(".bds-advanced-settings-option")).not.toBeNull()
+      );
+
+      menu.querySelector(".bds-advanced-settings-option").click();
+      await new Promise((r) => setTimeout(r, 80));
+
+      expect(openDrawerSection).toHaveBeenCalledWith("advanced");
     });
   });
 

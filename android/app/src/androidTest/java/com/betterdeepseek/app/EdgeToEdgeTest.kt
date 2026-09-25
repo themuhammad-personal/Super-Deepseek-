@@ -71,7 +71,25 @@ class EdgeToEdgeTest {
     }
 
     @Test
-    fun rootLayout_hasPaddingMatchingSystemBars() {
+    fun rootLayout_hasNoTopPadding_soThePageIsFullScreen() {
+        activityRule.scenario.onActivity { activity ->
+            val rootLayout = activity.window.decorView
+                .findViewById<FrameLayout>(android.R.id.content)
+                .getChildAt(0) as? FrameLayout
+            checkNotNull(rootLayout) { "Root FrameLayout not found as first child of content" }
+
+            // BDS-UI F.8: padding the top edge created a visible blank strip below the status
+            // bar. The WebView host must reach the top edge of the window instead.
+            assertEquals(
+                "Padding top must be 0 so the page flows under the status bar",
+                0,
+                rootLayout.paddingTop,
+            )
+        }
+    }
+
+    @Test
+    fun rootLayout_keepsSideAndBottomInsetsForSystemBarsAndIme() {
         activityRule.scenario.onActivity { activity ->
             val rootLayout = activity.window.decorView
                 .findViewById<FrameLayout>(android.R.id.content)
@@ -82,8 +100,17 @@ class EdgeToEdgeTest {
             checkNotNull(insets) { "Window insets not yet available" }
 
             val bars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
-            assertEquals("Padding top must equal status bar inset", bars.top, rootLayout.paddingTop)
-            assertEquals("Padding bottom must equal nav bar inset", bars.bottom, rootLayout.paddingBottom)
+            val ime = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime())
+
+            // Bottom handling is deliberately kept so the composer stays above the navigation bar
+            // and above the keyboard (adjustResize behaviour).
+            assertEquals("Padding left must match the system bar inset", bars.left, rootLayout.paddingLeft)
+            assertEquals("Padding right must match the system bar inset", bars.right, rootLayout.paddingRight)
+            assertEquals(
+                "Padding bottom must match max(system bar, IME) inset",
+                maxOf(bars.bottom, ime.bottom),
+                rootLayout.paddingBottom,
+            )
         }
     }
 }

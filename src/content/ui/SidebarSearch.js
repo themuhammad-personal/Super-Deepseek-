@@ -15,12 +15,32 @@ let activeTags = new Set();
 let searchDebounceTimer = 0;
 let searchSuggestionsContainer = null;
 
+/**
+ * BDS-UI F.3: the long custom sidebar search bar is disabled by default.
+ *
+ * DeepSeek's own compact search icon stays untouched; this flag only controls
+ * the extra full-width BDS search field (with tag filtering) that used to be
+ * injected above the chat list. The implementation is kept in this module so
+ * the feature can be re-enabled without touching any other file.
+ *
+ * TODO(BDS-UI): revisit once the sidebar redesign lands; flip to `true` to
+ * bring the long search bar back.
+ */
+const ENABLE_LONG_SIDEBAR_SEARCH = false;
+
 export function initSidebarSearch() {
+  if (!ENABLE_LONG_SIDEBAR_SEARCH) return;
   if (document.getElementById('bds-sidebar-search-container')) return;
   injectSearchInput();
 }
 
+/**
+ * Kept exported (and still a no-op when the long search bar is disabled) so
+ * existing callers — scanner.js rescans and the tag manager's refresh hook —
+ * keep working unchanged.
+ */
 export function injectSearchInput() {
+  if (!ENABLE_LONG_SIDEBAR_SEARCH) return;
   if (document.getElementById('bds-sidebar-search-container')) return;
 
   // Find the sidebar container that holds the chat list

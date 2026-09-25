@@ -16,6 +16,7 @@
 
 import "bds-platform-globals";
 import "../styles/content.css";
+import "../styles/settings.css";
 
 import state from "./state.js";
 import { setDevLogging } from "../lib/dev-log.js";

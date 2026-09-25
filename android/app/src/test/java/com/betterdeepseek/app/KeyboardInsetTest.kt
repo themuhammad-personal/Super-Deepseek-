@@ -84,7 +84,7 @@ class KeyboardInsetTest {
     }
 
     @Test
-    fun `system bar insets are applied as padding`() {
+    fun `side and bottom insets are applied as padding with no top strip`() {
         val insets = WindowInsetsCompat.Builder()
             .setInsets(WindowInsetsCompat.Type.systemBars(), Insets.of(24, 56, 24, 56))
             .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, 0))
@@ -93,7 +93,9 @@ class KeyboardInsetTest {
         ViewCompat.dispatchApplyWindowInsets(rootLayout, insets)
 
         assertEquals(24, rootLayout.paddingLeft)
-        assertEquals(56, rootLayout.paddingTop)
+        // BDS-UI F.8: the top edge is intentionally NOT padded — the page has to reach under the
+        // status bar instead of showing a blank strip below it.
+        assertEquals(0, rootLayout.paddingTop)
         assertEquals(24, rootLayout.paddingRight)
         assertEquals(56, rootLayout.paddingBottom)
     }

@@ -14,12 +14,12 @@ const projectManagerMocks = vi.hoisted(() => ({
 vi.mock("../../../src/content/bridge.js", () => bridgeMocks);
 vi.mock("../../../src/content/project-manager.js", () => projectManagerMocks);
 
-import SettingsPanel from "../../../src/content/ui/SettingsPanel.svelte";
+import AdvancedSettings from "../../../src/content/ui/settings/AdvancedSettings.svelte";
 import state from "../../../src/content/state.js";
 import { resetAppState } from "../../helpers/app-state.js";
 import { renderSvelte, flushUi } from "../../helpers/svelte.js";
 
-describe("SettingsPanel integration", () => {
+describe("AdvancedSettings integration", () => {
   beforeEach(() => {
     resetAppState({
       ui: { showToast: vi.fn() },
@@ -38,7 +38,7 @@ describe("SettingsPanel integration", () => {
   });
 
   it("adds a custom system prompt and saves settings to chrome storage", async () => {
-    const { target, cleanup } = renderSvelte(SettingsPanel);
+    const { target, cleanup } = renderSvelte(AdvancedSettings);
 
     target.querySelector(".bds-add-prompt-btn").click();
     await flushUi();
@@ -54,8 +54,6 @@ describe("SettingsPanel integration", () => {
     target.querySelector(".bds-modal-footer .bds-btn").click();
     await flushUi();
 
-    target.querySelector(".bds-advanced-toggle").click();
-    await flushUi();
     target.querySelector("#bds-preferred-lang").value = "Turkish";
     target.querySelector("#bds-preferred-lang").dispatchEvent(
       new Event("input", { bubbles: true }),
@@ -84,10 +82,8 @@ describe("SettingsPanel integration", () => {
   });
 
   it("toggles github token visibility and clears the token", async () => {
-    const { target, cleanup } = renderSvelte(SettingsPanel);
+    const { target, cleanup } = renderSvelte(AdvancedSettings);
 
-    target.querySelector(".bds-advanced-toggle").click();
-    await flushUi();
 
     const tokenInput = target.querySelector("#bds-github-token");
     const buttons = Array.from(target.querySelectorAll(".bds-token-btn"));
@@ -105,7 +101,7 @@ describe("SettingsPanel integration", () => {
 
   it("auto-saves active project instructions", async () => {
     vi.useFakeTimers();
-    const { target, cleanup } = renderSvelte(SettingsPanel);
+    const { target, cleanup } = renderSvelte(AdvancedSettings);
 
     const projectInstructions = target.querySelector("#bds-project-instructions");
     projectInstructions.value = "Updated project rules";
@@ -121,11 +117,8 @@ describe("SettingsPanel integration", () => {
   });
 
   it("renders and saves Deep Research context guard settings", async () => {
-    const { target, cleanup } = renderSvelte(SettingsPanel);
+    const { target, cleanup } = renderSvelte(AdvancedSettings);
 
-    // Open advanced settings
-    target.querySelector(".bds-advanced-toggle").click();
-    await flushUi();
 
     // Context guard toggle should be present and enabled by default
     const guardToggle = target.querySelector("#bds-context-guard-enabled");
@@ -141,6 +134,8 @@ describe("SettingsPanel integration", () => {
     const percentSlider = target.querySelector(".bds-slider-group input[type=\"range\"]");
     expect(percentSlider).toBeTruthy();
 
+    // BDS-UI F.6/F.7: the panel is a real screen now, so every section is
+    // already mounted (collapsed sections keep their inputs in the DOM).
     // Change context limit
     limitInput.value = "64000";
     limitInput.dispatchEvent(new Event("input", { bubbles: true }));
@@ -164,10 +159,8 @@ describe("SettingsPanel integration", () => {
   });
 
   it("clamps invalid context guard values on save", async () => {
-    const { target, cleanup } = renderSvelte(SettingsPanel);
+    const { target, cleanup } = renderSvelte(AdvancedSettings);
 
-    target.querySelector(".bds-advanced-toggle").click();
-    await flushUi();
 
     const limitInput = target.querySelector("#bds-context-guard-limit");
     limitInput.value = "100"; // Below minimum 16000
@@ -197,10 +190,8 @@ describe("SettingsPanel integration", () => {
     state.settings.deepResearchContextLimitTokens = 64000;
     state.settings.deepResearchContextStopPercent = 80;
 
-    const { target, cleanup } = renderSvelte(SettingsPanel);
+    const { target, cleanup } = renderSvelte(AdvancedSettings);
 
-    target.querySelector(".bds-advanced-toggle").click();
-    await flushUi();
 
     // Verify initial values from state are reflected
     const limitInput = target.querySelector("#bds-context-guard-limit");
@@ -219,9 +210,7 @@ describe("SettingsPanel integration", () => {
   it("deepResearchDeepFetch setting persists and clamps 0-5", async () => {
     state.settings.deepResearchDeepFetch = 3;
 
-    const { target, cleanup } = renderSvelte(SettingsPanel);
-    target.querySelector(".bds-advanced-toggle").click();
-    await flushUi();
+    const { target, cleanup } = renderSvelte(AdvancedSettings);
 
     // The research section should have the deepFetch input
     const deepFetchInput = target.querySelector("#bds-deep-research-deep-fetch");
@@ -239,7 +228,65 @@ describe("SettingsPanel integration", () => {
   });
 });
 
-describe("SettingsPanel import-all compatibility", () => {
+describe("AdvancedSettings shell (BDS-UI F.6/F.7)", () => {
+  beforeEach(() => {
+    resetAppState({ ui: { showToast: vi.fn() } });
+    bridgeMocks.pushConfigToPage.mockReset();
+    projectManagerMocks.getActiveProject.mockReturnValue(null);
+    document.body.innerHTML = "";
+  });
+
+  it("renders its own settings shell with no accordion wrapper", async () => {
+    const { target, cleanup } = renderSvelte(AdvancedSettings);
+    await flushUi();
+
+    expect(target.querySelector("#bds-settings-advanced")).not.toBeNull();
+    expect(target.querySelector(".bds-settings-hero-title").textContent).toBe("Advanced Settings");
+    // The old open/close advanced accordion is gone.
+    expect(target.querySelector(".bds-advanced-toggle")).toBeNull();
+
+    cleanup();
+  });
+
+  it("does not own any MCP / Plugins UI any more", async () => {
+    const { target, cleanup } = renderSvelte(AdvancedSettings);
+    await flushUi();
+
+    expect(target.querySelector("#bds-settings-plugins")).toBeNull();
+    expect(target.querySelector("#bds-mcp-inline-max-chars")).toBeNull();
+    expect(target.textContent).not.toContain("MCP Servers");
+
+    cleanup();
+  });
+
+  it("exposes scrollToSection which expands and targets a section card", async () => {
+    const { target, cleanup, instance } = renderSvelte(AdvancedSettings);
+    await flushUi();
+
+    const toggle = target.querySelector('[data-bds-section="subChat"]');
+    expect(toggle).not.toBeNull();
+    expect(toggle.classList.contains("open")).toBe(false);
+
+    instance.scrollToSection("subChat");
+    await flushUi();
+
+    expect(toggle.classList.contains("open")).toBe(true);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+
+    cleanup();
+  });
+
+  it("keeps the settings search field available without opening anything", async () => {
+    const { target, cleanup } = renderSvelte(AdvancedSettings);
+    await flushUi();
+
+    expect(target.querySelector(".bds-advanced-search-input")).not.toBeNull();
+
+    cleanup();
+  });
+});
+
+describe("AdvancedSettings import-all compatibility", () => {
   const SKILLS_SECTION_EXPORT = [
     { id: "s1", name: "Debugger", usage: "logs", content: "Inspect logs", active: true },
   ];
@@ -299,7 +346,7 @@ describe("SettingsPanel import-all compatibility", () => {
     state.skills = [];
     state.memories = { old: { value: "old", importance: "called" } };
 
-    const { target, cleanup } = renderSvelte(SettingsPanel);
+    const { target, cleanup } = renderSvelte(AdvancedSettings);
     await flushUi();
     await importAll(target, FULL_BACKUP);
 
@@ -316,7 +363,7 @@ describe("SettingsPanel import-all compatibility", () => {
       { id: "keep", name: "KeepMe", usage: "", content: "keep", active: true },
     ];
 
-    const { target, cleanup } = renderSvelte(SettingsPanel);
+    const { target, cleanup } = renderSvelte(AdvancedSettings);
     await flushUi();
     await importAll(target, SKILLS_SECTION_EXPORT);
 

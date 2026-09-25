@@ -1,5 +1,16 @@
 <script>
-  import SettingsPanel from "./SettingsPanel.svelte";
+  /**
+   * BDS drawer — opened from the sidebar account/profile menu (BDS-UI F.4).
+   *
+   * It hosts the two physically separated settings systems:
+   *   · settings/AdvancedSettings.svelte  — every non-MCP setting
+   *   · settings/PluginsSettings.svelte   — MCP servers ("Plugins")
+   * plus the skill / character / memory / project / saved-item sections, the
+   * relocated commands area and the relocated Get BDS App / What's New entries.
+   */
+  import { tick } from "svelte";
+  import AdvancedSettings from "./settings/AdvancedSettings.svelte";
+  import PluginsSettings from "./settings/PluginsSettings.svelte";
   import CharacterList from "./CharacterList.svelte";
   import SkillList from "./SkillList.svelte";
   import MemoryList from "./MemoryList.svelte";
@@ -7,16 +18,29 @@
   import ProjectsCard from "./ProjectsCard.svelte";
   import SavedItems from "./SavedItems.svelte";
   import CommandManager from "../commands/CommandManager.svelte";
+  import DeepCodeToggle from "./DeepCodeToggle.svelte";
   import { COMMANDS } from "../commands/registry.js";
-  import { findChatEditor, setChatInputText } from "../auto.js";
+  import { insertCommandIntoChat } from "../commands/insert-command.js";
+  import { setDeepCodeEnabled } from "../deep-code.js";
   import appState from "../state.js";
   import { i18n, t } from "../../lib/i18n.svelte.js";
   import { getExtensionVersion } from "../../lib/extension-version.js";
+  import { scrollIntoViewSafe } from "./scroll-into-view.js";
 
   let { open = false, onclose, onopenapiplayground } = $props();
 
   // Resolved from the running manifest, so this never needs a manual bump.
   const extensionVersion = getExtensionVersion();
+
+  // Same destination the account-menu entry used before it moved here.
+  const GET_BDS_APP_URL = "https://github.com/EdgeTypE/better-deepseek/releases";
+
+  // BDS-UI E.1 / J: the composer-side `BDS_TARGET === "android"` skip branch
+  // moved here together with the DeepCode toggle. The WebView has no DeepSeek
+  // Harness bridge, so Android keeps seeing one DeepCode control fewer — the
+  // section is simply not rendered there, exactly like the old composer icon.
+  // TODO(BDS-UI): revisit if the Android build ever ships the harness bridge.
+  const showDeepCodeSection = (process.env.BDS_TARGET || "chrome") !== "android";
 
   let TIP_COUNT = $derived.by(() => {
     const tips = i18n.messages?.messages?.tips;
@@ -45,18 +69,24 @@
     onopenapiplayground();
   }
 
-  let settingsRef = $state(null);
+  let advancedRef = $state(null);
+  let pluginsRef = $state(null);
   let charactersRef = $state(null);
   let skillsRef = $state(null);
   let memoryRef = $state(null);
   let projectsManagerRef = $state(null);
   let savedItemsRef = $state(null);
+  // BDS-UI F.2: commands are no longer a primary drawer section — the upload
+  // drawer's Command card is the main entry point and the full list/manager
+  // only appears when explicitly requested (openDrawerSection("commands")).
   let showCmdManager = $state(false);
+  let showCommandsPanel = $state(false);
 
   let showProjectsManager = $state(false);
 
   export function refreshSettings() {
-    if (settingsRef) settingsRef.refresh();
+    if (advancedRef) advancedRef.refresh();
+    if (pluginsRef) pluginsRef.refresh();
   }
   export function refreshCharacters() {
     if (charactersRef) charactersRef.refresh();
@@ -69,13 +99,13 @@
   }
   export function refreshProjects() {
     if (projectsManagerRef) projectsManagerRef.refresh();
-    if (settingsRef) settingsRef.refreshProject();
+    if (advancedRef) advancedRef.refreshProject();
   }
   export function refreshSavedItems() {
     if (savedItemsRef) savedItemsRef.refresh();
   }
   export function refreshCssSnippets() {
-    if (settingsRef) settingsRef.refreshCssSnippets();
+    if (advancedRef) advancedRef.refreshCssSnippets();
   }
 
   function openProjectsManager() {
@@ -87,20 +117,60 @@
   }
 
   function insertCommand(cmdId) {
-    const editor = findChatEditor();
-    if (!editor) return;
-    setChatInputText("/" + cmdId + " ");
-    editor.focus();
+    insertCommandIntoChat(cmdId);
     onclose();
   }
 
-  export async function handleClose() {
-    if (settingsRef && settingsRef.checkBeforeClose) {
-      const ok = await settingsRef.checkBeforeClose();
-      if (ok) onclose();
-    } else {
-      onclose();
+  // ── Drawer section navigation (BDS-UI openDrawerSection / scrollToSection) ──
+
+  const SECTION_TARGETS = {
+    advanced: "bds-settings-advanced",
+    settings: "bds-settings-advanced",
+    plugins: "bds-settings-plugins",
+    mcp: "bds-settings-plugins",
+    commands: "bds-section-commands",
+    deepcode: "bds-section-deepcode",
+    skills: "bds-section-skills",
+    characters: "bds-section-characters",
+    memories: "bds-section-memories",
+    projects: "bds-section-projects",
+    saved: "bds-section-saved",
+    savedItems: "bds-section-saved",
+  };
+
+  /** Scrolls the drawer body to a named section. */
+  export function scrollToSection(section) {
+    const id = SECTION_TARGETS[section];
+    if (!id) return;
+    scrollIntoViewSafe(document.getElementById(id));
+  }
+
+  /**
+   * Reveals and scrolls to a named section. Called by the account-menu entries
+   * (Plugins / Advanced Settings) and by the upload drawer's Command card.
+   */
+  export async function openDrawerSection(section) {
+    if (section === "projects") {
+      showProjectsManager = true;
+      return;
     }
+    showProjectsManager = false;
+    if (section === "commands") {
+      // BDS-UI F.2: the command manager is its own panel inside the drawer;
+      // the advanced settings no longer host a Commands section.
+      showCommandsPanel = true;
+    }
+    await tick();
+    scrollToSection(section);
+  }
+
+  export async function handleClose() {
+    const guards = [advancedRef, pluginsRef].filter((ref) => ref && ref.checkBeforeClose);
+    for (const ref of guards) {
+      const ok = await ref.checkBeforeClose();
+      if (!ok) return;
+    }
+    onclose();
   }
 </script>
 
@@ -141,8 +211,8 @@
     </div>
   {:else}
     <div class="bds-drawer-body">
-      <SettingsPanel
-        bind:this={settingsRef}
+      <AdvancedSettings
+        bind:this={advancedRef}
         onsave={handleSettingsSaved}
         onapiplayground={openApiPlayground}
         onimportdata={() => {
@@ -155,82 +225,144 @@
         }}
       />
 
-      <hr />
-
-      <SkillList bind:this={skillsRef} />
+      <PluginsSettings bind:this={pluginsRef} onsave={handleSettingsSaved} />
 
       <hr />
 
-      <CharacterList bind:this={charactersRef} />
+      <div class="bds-drawer-section" id="bds-section-skills">
+        <SkillList bind:this={skillsRef} />
+      </div>
 
       <hr />
 
-      <MemoryList bind:this={memoryRef} />
+      <div class="bds-drawer-section" id="bds-section-characters">
+        <CharacterList bind:this={charactersRef} />
+      </div>
 
       <hr />
 
-      <ProjectsCard onmanage={openProjectsManager} />
+      <div class="bds-drawer-section" id="bds-section-memories">
+        <MemoryList bind:this={memoryRef} />
+      </div>
 
       <hr />
 
-      <SavedItems bind:this={savedItemsRef} />
+      <div class="bds-drawer-section" id="bds-section-projects">
+        <ProjectsCard onmanage={openProjectsManager} />
+      </div>
 
       <hr />
 
-      <div class="bds-section-title">
-        <div
-          style="display: flex; align-items: center; justify-content: space-between; width: 100%;"
-        >
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <span class="bds-icon-inline">
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                ><polygon
-                  points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"
-                /></svg
-              >
-            </span>
-            <span>{t("commands.title")}</span>
-          </div>
-          <button
-            type="button"
-            class="bds-btn-outlined"
-            style="font-size:11px;padding:3px 7px;"
-            onclick={() => (showCmdManager = !showCmdManager)}
-          >
-            {showCmdManager ? t("commands.done") : t("commands.manage")}
-          </button>
+      <div class="bds-drawer-section" id="bds-section-saved">
+        <SavedItems bind:this={savedItemsRef} />
+      </div>
+
+      <hr />
+
+      {#if showDeepCodeSection}
+      <!-- DeepCode (BDS-UI E.1): the composer row is locked to five icons, so
+           the DeepCode toggle lives here — same component, same state, same
+           harness bridge, only the host surface changed. -->
+      <div class="bds-drawer-section" id="bds-section-deepcode">
+        <div class="bds-section-title">
+          <span class="bds-icon-inline">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              ><polyline points="16 18 22 12 16 6"></polyline><polyline
+                points="8 6 2 12 8 18"
+              ></polyline></svg
+            >
+          </span>
+          <span>{t("drawer.sectionDeepCode")}</span>
+        </div>
+        <p class="bds-drawer-section-hint">{t("drawer.deepCodeHint")}</p>
+        <div class="bds-deep-code-host">
+          <DeepCodeToggle
+            enabled={appState.deepCode.enabled}
+            onToggle={(enabled) => setDeepCodeEnabled(enabled)}
+            onOpenModal={() => window.dispatchEvent(new CustomEvent("bds:open-deep-code-modal"))}
+          />
         </div>
       </div>
-      {#if !showCmdManager}
-        <div class="bds-featured-list">
-          <h4>{t("commands.builtinCommands")}</h4>
-          {#each COMMANDS as cmd}
-            <button
-              type="button"
-              class="bds-featured-item"
-              onclick={() => insertCommand(cmd.id)}
-            >
-              <span class="bds-cmd-icon">{@html cmd.icon}</span>
-              <span class="bds-cmd-info">
-                <span class="bds-cmd-name">/{cmd.id}</span>
-                <span class="bds-cmd-desc">{t(cmd.descKey)}</span>
+
+      <hr />
+      {/if}
+
+      <!-- Commands (BDS-UI F.2): collapsed by default; the upload drawer's
+           Command card is the primary entry point. -->
+      <div class="bds-drawer-section" id="bds-section-commands">
+        <div class="bds-section-title">
+          <div
+            style="display: flex; align-items: center; justify-content: space-between; width: 100%;"
+          >
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span class="bds-icon-inline">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  ><polygon
+                    points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"
+                  /></svg
+                >
               </span>
-              <span class="bds-cmd-usage">{t(cmd.usageKey)}</span>
-            </button>
-          {/each}
+              <span>{t("commands.title")}</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <button
+                type="button"
+                class="bds-btn-outlined"
+                style="font-size:11px;padding:3px 7px;"
+                onclick={() => (showCommandsPanel = !showCommandsPanel)}
+              >
+                {showCommandsPanel ? t("commands.done") : t("commands.helpTitle")}
+              </button>
+              <button
+                type="button"
+                class="bds-btn-outlined"
+                style="font-size:11px;padding:3px 7px;"
+                onclick={() => (showCmdManager = !showCmdManager)}
+              >
+                {showCmdManager ? t("commands.done") : t("commands.manage")}
+              </button>
+            </div>
+          </div>
         </div>
-      {/if}
-      {#if showCmdManager}
-        <CommandManager onclose={() => (showCmdManager = false)} />
-      {/if}
+        {#if showCommandsPanel && !showCmdManager}
+          <div class="bds-featured-list">
+            <h4>{t("commands.builtinCommands")}</h4>
+            {#each COMMANDS as cmd (cmd.id)}
+              <button
+                type="button"
+                class="bds-featured-item"
+                onclick={() => insertCommand(cmd.id)}
+              >
+                <span class="bds-cmd-icon">{@html cmd.icon}</span>
+                <span class="bds-cmd-info">
+                  <span class="bds-cmd-name">/{cmd.id}</span>
+                  <span class="bds-cmd-desc">{t(cmd.descKey)}</span>
+                </span>
+                <span class="bds-cmd-usage">{t(cmd.usageKey)}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+        {#if showCmdManager}
+          <CommandManager onclose={() => (showCmdManager = false)} />
+        {/if}
+      </div>
     </div>
 
     <div class="bds-drawer-bottom">
@@ -253,6 +385,53 @@
         </div>
       {/if}
       <div class="bds-drawer-footer">
+        <!-- BDS-UI F.5 (Conflict 4): Get BDS App and What's New moved out of the
+             account popover and live next to the GitHub link instead. -->
+        <div class="bds-drawer-footer-actions">
+          <button
+            type="button"
+            id="bds-get-app-entry"
+            class="bds-drawer-footer-action"
+            onclick={() => window.open(GET_BDS_APP_URL, "_blank")}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              ><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline
+                points="7 10 12 15 17 10"
+              /><line x1="12" y1="15" x2="12" y2="3" /></svg
+            >
+            {t("drawer.getBdsApp")}
+          </button>
+          <button
+            type="button"
+            id="bds-whats-new-entry"
+            class="bds-drawer-footer-action"
+            onclick={() => {
+              appState.whatsNewPending = true;
+              if (appState.ui) appState.ui.refreshWhatsNew();
+            }}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              ><path d="M12 2l2.4 5.2 5.6.7-4.1 3.9 1.1 5.6L12 14.8 6.9 17.4l1.1-5.6L3.9 7.9l5.6-.7z" /></svg
+            >
+            {t("drawer.whatsNew")}
+          </button>
+        </div>
         <a
           href="https://github.com/EdgeTypE/better-deepseek"
           target="_blank"
