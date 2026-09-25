@@ -197,15 +197,19 @@ private fun fileExtension(filename: String): String =
  * - Native file/folder picker results delivered back as CustomEvents
  * - Theme reporting (status/nav bar icon colours)
  */
-class WebViewBridge(
+internal class WebViewBridge(
         private val context: Context,
         httpClient: OkHttpClient? = null,
         private val githubApiBaseUrl: String = DEFAULT_GITHUB_API_BASE_URL,
-        private val remoteDataSync: RemoteDataSync? = null,
-        private val mcpClient: McpClient? = null,
-        private val harnessClient: HarnessClient? = null,
-        private val youtubeTranscript: YouTubeTranscript? = null,
-        private val apiProxy: ApiProxyClient? = null,
+        // Test/DI overrides. These are plain constructor parameters (not `private val`):
+        // the resolved instances are exposed below as class properties of the same
+        // name, and a `val` parameter would collide with them ("conflicting
+        // declarations"). Mirrors the `httpClient` parameter/property pair.
+        remoteDataSync: RemoteDataSync? = null,
+        mcpClient: McpClient? = null,
+        harnessClient: HarnessClient? = null,
+        youtubeTranscript: YouTubeTranscript? = null,
+        apiProxy: ApiProxyClient? = null,
 ) {
 
     private val prefs: SharedPreferences =

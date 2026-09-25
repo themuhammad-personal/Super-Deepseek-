@@ -124,11 +124,17 @@ jobs:
         working-directory: android
         run: |
           log=/tmp/gradle-unit-test.log
+          annotate() {
+            while IFS= read -r line; do
+              [ -n "$line" ] || continue
+              printf '::error::%s\n' "${line//'%'/'%25'}"
+            done
+          }
           if [ -f "$log" ]; then
-            grep -nE '^(e: |w: .*error|FAILURE:|.*FAILED$|Caused by:)|error:|What went wrong|> Task .*FAILED' "$log" \
-              | tail -n 45 | while IFS= read -r line; do
-                printf '::error::%s\n' "${line//'%'/'%25'}"
-              done
+            grep -nE '^e: ' "$log" | grep '/src/main/' | head -n 22 | annotate
+            grep -nE '^e: ' "$log" | grep '/src/test/' | head -n 22 | annotate
+            grep -nE '^(e: |FAILURE:|Caused by:)|What went wrong|Execution failed for task' "$log" \
+              | grep -v '/src/main/\|/src/test/' | head -n 8 | annotate
           fi
           python3 - <<'PY'
           import glob, xml.etree.ElementTree as ET
