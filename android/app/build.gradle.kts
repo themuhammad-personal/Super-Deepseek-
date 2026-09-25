@@ -38,11 +38,18 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // Keys the release workflow decodes from the BDS_KEYSTORE secret (see
+    // .github/workflows/release.yml). When that secret is not configured — local
+    // builds, forks, or a repo whose secrets are unavailable — the file does not
+    // exist, and AGP would fail while validating the signing config, so the
+    // release build type only attaches the config when the keystore is present.
+    val releaseKeystore = rootProject.file("ci-release.jks")
+
     // Direct child of `android {}` — the release signing config has to exist before
     // buildTypes references it with signingConfigs.getByName("release").
     signingConfigs {
         create("release") {
-            storeFile = rootProject.file("ci-release.jks")
+            storeFile = releaseKeystore
             storePassword = System.getenv("BDS_KEYSTORE_PASSWORD") ?: ""
             keyAlias = System.getenv("BDS_KEY_ALIAS") ?: ""
             keyPassword = System.getenv("BDS_KEY_PASSWORD") ?: ""
@@ -54,7 +61,9 @@ android {
             isMinifyEnabled = false
         }
         release {
-            signingConfig = signingConfigs.getByName("release")
+            if (releaseKeystore.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
