@@ -104,7 +104,7 @@ internal class RemoteDataSync(
             )
             return if (diff != null) {
                 writeMap(diff)
-                result(success = true, writtenKeys = diff.keys().toList())
+                result(success = true, writtenKeys = keysOf(diff))
             } else {
                 result(success = true, writtenKeys = emptyList())
             }
@@ -169,7 +169,7 @@ internal class RemoteDataSync(
                 val diff = diffOf(Triple(KEY_ANNOUNCEMENT, storedValue(KEY_ANNOUNCEMENT), announcements))
                 return if (diff != null) {
                     writeMap(diff)
-                    result(success = true, writtenKeys = diff.keys().toList())
+                    result(success = true, writtenKeys = keysOf(diff))
                 } else {
                     result(success = true, writtenKeys = emptyList())
                 }
@@ -208,7 +208,7 @@ internal class RemoteDataSync(
                 )
                 return if (diff != null) {
                     writeMap(diff)
-                    result(success = true, writtenKeys = diff.keys().toList())
+                    result(success = true, writtenKeys = keysOf(diff))
                 } else {
                     result(success = true, writtenKeys = emptyList())
                 }
@@ -232,9 +232,15 @@ internal class RemoteDataSync(
         return if (diff.length() > 0) diff else null
     }
 
+    /**
+     * `Object.keys(...)` in JS. org.json hands out an `Iterator` (not a Collection),
+     * so it has to be turned into a Sequence before `toList()` is available.
+     */
+    private fun keysOf(json: JSONObject): List<String> = json.keys().asSequence().toList()
+
     private fun writeMap(values: JSONObject) {
         val editor = prefs.edit()
-        for (key in values.keys()) {
+        for (key in keysOf(values)) {
             editor.putString(key, values.get(key).toString())
         }
         editor.apply()

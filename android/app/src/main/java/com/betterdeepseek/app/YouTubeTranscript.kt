@@ -1,5 +1,6 @@
 package com.betterdeepseek.app
 
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -159,11 +160,12 @@ internal class YouTubeTranscript(
         val lang = first.optString("languageCode")
         if (lang.isEmpty()) throw TranscriptException("No transcripts are available for this video ($videoRef)")
 
-        val url = try {
-            okhttp3.HttpUrl.get(baseUrl)
-        } catch (_: Exception) {
-            throw TranscriptException("No transcripts are available for this video ($videoRef)")
-        }
+        // OkHttp 4 moved the static `HttpUrl.get(String)` to an extension function.
+        val url =
+                baseUrl.toHttpUrlOrNull()
+                        ?: throw TranscriptException(
+                                "No transcripts are available for this video ($videoRef)"
+                        )
         // Only download caption tracks from YouTube hosts (the npm package checks
         // `hostname.endsWith(".youtube.com")`); the suffix is injectable for tests.
         if (!url.host.endsWith(captionHostSuffix)) {
