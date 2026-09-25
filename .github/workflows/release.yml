@@ -4,10 +4,6 @@ on:
   push:
     branches:
       - main
-      # TEMPORARY (verification session): lets this fix branch produce the signed
-      # release APK without a tag or a manual dispatch (workflow_dispatch is only
-      # available for workflows that exist on the default branch).
-      - "arena/**"
     tags:
       - "v*"
   # Manual trigger (e.g. `gh workflow run release.yml --ref <branch>`) so a

@@ -112,46 +112,7 @@ jobs:
 
       - name: Run Kotlin unit tests
         working-directory: android
-        run: |
-          set -o pipefail
-          ./gradlew --no-daemon test 2>&1 | tee /tmp/gradle-unit-test.log
-
-      # TEMPORARY DEBUG (remove before merge): surface Gradle/Kotlin failures as
-      # check-run annotations so they can be inspected without downloading the
-      # (blob-storage hosted) raw job log.
-      - name: Surface Kotlin failures
-        if: always()
-        working-directory: android
-        run: |
-          log=/tmp/gradle-unit-test.log
-          annotate() {
-            while IFS= read -r line; do
-              [ -n "$line" ] || continue
-              printf '::error::%s\n' "${line//'%'/'%25'}"
-            done
-          }
-          if [ -f "$log" ]; then
-            grep -nE '^e: ' "$log" | grep '/src/main/' | head -n 22 | annotate
-            grep -nE '^e: ' "$log" | grep '/src/test/' | head -n 22 | annotate
-            grep -nE '^(e: |FAILURE:|Caused by:)|What went wrong|Execution failed for task' "$log" \
-              | grep -v '/src/main/\|/src/test/' | head -n 8 | annotate
-          fi
-          python3 - <<'PY'
-          import glob, xml.etree.ElementTree as ET
-          for path in sorted(glob.glob('app/build/test-results/**/*.xml', recursive=True)):
-              try:
-                  root = ET.parse(path).getroot()
-              except Exception:
-                  continue
-              for case in root.iter('testcase'):
-                  for failure in list(case.findall('failure')) + list(case.findall('error')):
-                      msg = (failure.get('message') or '').strip()
-                      text = (failure.text or '').strip()
-                      trace = ' | '.join(line.strip() for line in text.splitlines()
-                                         if 'betterdeepseek' in line or 'AssertionError' in line)
-                      detail = (msg + (' <- ' + trace if trace else '')).strip()
-                      print(f"::error::{case.get('classname')}.{case.get('name')}: {detail[:900]}")
-          PY
+        run: ./gradlew --no-daemon test
 
       - name: Build Android APK (debug)
         working-directory: android
