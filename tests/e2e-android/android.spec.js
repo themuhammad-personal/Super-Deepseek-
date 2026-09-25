@@ -30,9 +30,24 @@ async function addAssistantMessage(page, text) {
 async function openDrawer(page) {
   const drawer = page.locator("#bds-drawer");
   if (await drawer.evaluate((node) => node.classList.contains("bds-open"))) return;
-  await page.locator("#mock-settings-trigger").click();
-  await page.locator(".bds-advanced-settings-option").click();
+  // Clicks are dispatched in-page: the fixture app-shell overlaps this corner
+  // button, and the account popover is rebuilt by the fixture on every open.
+  await page.locator("#mock-settings-trigger").evaluate((button) => button.click());
+  const advancedOption = page.locator(".bds-advanced-settings-option");
+  await advancedOption.waitFor({ state: "visible" });
+  await advancedOption.evaluate((option) => option.click());
   await expect(drawer).toHaveClass(/bds-open/);
+  // The drawer's lists load their data asynchronously; wait until the last of
+  // them has rendered its file input so callers can click inside immediately.
+  await expect(page.locator("#bds-drawer #bds-skill-upload")).toHaveCount(1);
+}
+
+/** "Import" button of one drawer section (skills / characters / memories). */
+function sectionImportButton(page, sectionId) {
+  return page
+    .locator(`#bds-drawer #${sectionId} button`)
+    .filter({ hasText: /^Import$/ })
+    .first();
 }
 
 /**
@@ -41,9 +56,25 @@ async function openDrawer(page) {
  * exact label so "File" cannot collide with "Index folder".
  */
 function uploadCard(page, label) {
-  return page
-    .locator(".bds-attach-dropdown .bds-ud-card")
-    .filter({ hasText: new RegExp(`^${label}$`) });
+  return page.locator(".bds-attach-dropdown .bds-ud-card").filter({
+    has: page.locator(".bds-ud-card-label").getByText(label, { exact: true }),
+  });
+}
+
+/**
+ * Opens the BDS upload drawer. The click is dispatched in-page on purpose: the
+ * mock app-shell overlaps the composer corner on this viewport, and the
+ * composer is re-rendered while the scanner rescans, which makes coordinate
+ * clicks flaky. The assertions that follow still verify the real handlers.
+ */
+async function openUploadDrawer(page) {
+  await page.locator(".bds-plus-btn").evaluate((button) => button.click());
+  await expect(page.locator(".bds-attach-dropdown")).toBeVisible();
+}
+
+/** Clicks one card of the (already open) upload drawer. */
+async function clickUploadCard(page, label) {
+  await uploadCard(page, label).first().evaluate((card) => card.click());
 }
 
 test("loads the bundle and surfaces the BDS Plus button inside the WebView simulator", async ({
@@ -59,7 +90,7 @@ test("hides the Get App promotional button from the Android content bundle", asy
 });
 
 test("shows the folder upload card on Android when native picker is available", async ({ page }) => {
-  await page.locator(".bds-plus-btn").click({ force: true });
+  await openUploadDrawer(page);
   await expect(page.locator(".bds-attach-dropdown")).toBeVisible();
   await expect(page.locator(".bds-attach-dropdown .bds-upload-grid")).toBeVisible();
   await expect(uploadCard(page, "Index folder")).toBeVisible();
@@ -130,6 +161,56 @@ test("hides the voice prompt mic button on Android", async ({ page }) => {
   await expect(page.locator(".bds-mic-btn")).toHaveCount(0);
 });
 
+test("account menu carries Plugins + Advanced Settings and no relocated entries", async ({
+  page,
+}) => {
+  await page.locator("#mock-settings-trigger").click({ force: true });
+
+  const labels = page.locator(".ds-dropdown-menu .ds-dropdown-menu-option__label");
+  await expect(labels.filter({ hasText: /^Plugins$/ })).toHaveCount(1);
+  await expect(labels.filter({ hasText: /^Advanced Settings$/ })).toHaveCount(1);
+  // BDS-UI F.5: these moved to the drawer footer, the account menu must not
+  // carry them any more (and the native "Download mobile App" stays untouched).
+  await expect(page.locator(".bds-get-app-option")).toHaveCount(0);
+  await expect(page.locator(".bds-whats-new-option")).toHaveCount(0);
+  await expect(labels.filter({ hasText: /^Download mobile App$/ })).toHaveCount(1);
+  await expect(labels.filter({ hasText: /^Log out$/ })).toHaveCount(1);
+
+  await page.locator(".bds-plugins-option").click({ force: true });
+  await expect(page.locator("#bds-drawer")).toHaveClass(/bds-open/);
+  await expect(page.locator("#bds-settings-plugins")).toBeVisible();
+});
+
+test("composer hosts the upload trigger only, with no project or DeepCode icon", async ({
+  page,
+}) => {
+  const row = await page.evaluate(() => {
+    const composer = document.querySelector(".composer-shell");
+    const plus = document.querySelector(".bds-attach-menu-mount");
+    const research = document.querySelector(".bds-deep-research-mount");
+    const send = document.querySelector("#send-button");
+    const before = (a, b) =>
+      Boolean(a && b && a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    return {
+      plusInComposer: Boolean(plus && composer && composer.contains(plus)),
+      // BDS-UI E.1: the upload trigger replaces the native attach slot, so it
+      // must sit inside the composer and before the send button.
+      plusBeforeSend: before(plus, send),
+      researchBeforeSend: before(research, send),
+      projectButtons: document.querySelectorAll(".bds-project-btn").length,
+      composerDeepCode: document.querySelectorAll(".composer-shell .bds-deep-code-mount").length,
+      anyDeepCodeMount: document.querySelectorAll(".bds-deep-code-mount").length,
+    };
+  });
+
+  expect(row.plusInComposer).toBe(true);
+  expect(row.plusBeforeSend).toBe(true);
+  expect(row.researchBeforeSend).toBe(true);
+  expect(row.projectButtons).toBe(0);
+  expect(row.composerDeepCode).toBe(0);
+  expect(row.anyDeepCodeMount).toBe(0);
+});
+
 test("Upload File on Android uses native picker bridge and injects markdown", async ({ page }) => {
   await page.evaluate(() => {
     const input = document.querySelector("#native-file-input");
@@ -145,8 +226,8 @@ test("Upload File on Android uses native picker bridge and injects markdown", as
     };
   });
 
-  await page.locator(".bds-plus-btn").click({ force: true });
-  await uploadCard(page, "File").click({ force: true });
+  await openUploadDrawer(page);
+  await clickUploadCard(page, "File");
 
   await expect
     .poll(() => page.evaluate(() => window.__mockDeepSeek.getAttachedFiles()))
@@ -164,8 +245,8 @@ test("upload works twice across a composer re-render on Android", async ({ page 
     });
   });
 
-  await page.locator(".bds-plus-btn").click({ force: true });
-  await uploadCard(page, "File").click({ force: true });
+  await openUploadDrawer(page);
+  await clickUploadCard(page, "File");
 
   await expect
     .poll(() => page.evaluate(() => window.__mockDeepSeek.getAttachedFiles()))
@@ -177,8 +258,8 @@ test("upload works twice across a composer re-render on Android", async ({ page 
   // the DOM, not silently on the stale detached one.
   await page.evaluate(() => window.__mockDeepSeek.replaceFileInput());
 
-  await page.locator(".bds-plus-btn").click({ force: true });
-  await uploadCard(page, "File").click({ force: true });
+  await openUploadDrawer(page);
+  await clickUploadCard(page, "File");
 
   await expect
     .poll(() => page.evaluate(() => window.__mockDeepSeek.getAttachedFiles()))
@@ -203,8 +284,8 @@ test("Upload File on Android requests images in Vision mode", async ({ page }) =
   });
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 
-  await page.locator(".bds-plus-btn").click({ force: true });
-  await uploadCard(page, "File").click({ force: true });
+  await openUploadDrawer(page);
+  await clickUploadCard(page, "File");
 
   await expect
     .poll(() => page.evaluate(() => window.__mockDeepSeek.nativeVisionUploadFileMode))
@@ -228,8 +309,8 @@ test("Upload Folder on Android uses native picker bridge and injects workspace",
     };
   });
 
-  await page.locator(".bds-plus-btn").click({ force: true });
-  await uploadCard(page, "Index folder").click({ force: true });
+  await openUploadDrawer(page);
+  await clickUploadCard(page, "Index folder");
 
   await expect
     .poll(() => page.evaluate(() => window.__mockDeepSeek.getAttachedFiles()))
@@ -249,8 +330,8 @@ test("reassembles multi-chunk native folder payloads", async ({ page }) => {
     });
   });
 
-  await page.locator(".bds-plus-btn").click({ force: true });
-  await uploadCard(page, "Index folder").click({ force: true });
+  await openUploadDrawer(page);
+  await clickUploadCard(page, "Index folder");
 
   await expect
     .poll(() => page.evaluate(() => window.__mockDeepSeek.getAttachedFiles()))
@@ -265,8 +346,8 @@ test("shows a toast when the native picker returns only skipped files", async ({
     });
   });
 
-  await page.locator(".bds-plus-btn").click({ force: true });
-  await uploadCard(page, "File").click({ force: true });
+  await openUploadDrawer(page);
+  await clickUploadCard(page, "File");
 
   await expect(page.locator("#bds-toast-stack .bds-toast")).toContainText(
     "Nothing was attached",
@@ -302,10 +383,11 @@ test("drawer import inputs stay single-file on Android", async ({ page }) => {
     }
   });
 
-  const importButtons = page.locator("#bds-drawer button").filter({ hasText: /^Import$/ });
-  await importButtons.nth(0).click({ force: true });
-  await importButtons.nth(1).click({ force: true });
-  await importButtons.nth(2).click({ force: true });
+  // Click each section's own Import button: positional indexing raced the
+  // asynchronously mounted lists (skills could render after characters).
+  await sectionImportButton(page, "bds-section-skills").click({ force: true });
+  await sectionImportButton(page, "bds-section-characters").click({ force: true });
+  await sectionImportButton(page, "bds-section-memories").click({ force: true });
 
   await expect
     .poll(() => page.evaluate(() => window.__mockDeepSeek.drawerFilePickerModes))
@@ -459,8 +541,8 @@ test("imports a GitHub repository and commit history through the Android bridge"
     };
   }, githubZipBase64);
 
-  await page.locator(".bds-plus-btn").click({ force: true });
-  await uploadCard(page, "GitHub repo").click({ force: true });
+  await openUploadDrawer(page);
+  await clickUploadCard(page, "GitHub repo");
   await page.locator(".bds-github-input").fill("octocat/Hello-World");
   await page.locator(".bds-github-checkbox input").check({ force: true });
   await page.locator(".bds-github-btn-import").click({ force: true });

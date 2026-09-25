@@ -200,9 +200,10 @@ export const test = base.extend({
   page: async ({ context }, use) => {
     const page = await context.newPage();
     await page.goto("https://chat.deepseek.com/");
-    // BDS-UI F.4: the floating top BDS trigger is gone. The composer's Plus
-    // button is the BDS surface that is always present on first paint.
-    await page.waitForSelector("#bds-drawer");
+    // BDS-UI F.4: the floating top BDS trigger is gone. The drawer is rendered
+    // up-front (in its closed state), and the composer's Plus button is the BDS
+    // surface that is always visible on first paint.
+    await page.waitForSelector("#bds-drawer", { state: "attached" });
     await page.waitForSelector(".bds-plus-btn");
     await expect(page.locator(".bds-plus-btn").first()).toBeInViewport();
     await use(page);
