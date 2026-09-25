@@ -143,6 +143,25 @@ class RemoteDataSyncTest {
         assertEquals(0, second.getJSONArray("writtenKeys").length())
     }
 
+    @Test
+    fun `zz debug updateLanguages diff keys`() {
+        enqueueAllLocales()
+        sync.updateLanguages(1_700_000_000_000L)
+        val beforeLocales = prefs.getString("bds_locale_updates", null)
+        val beforeChecked = prefs.getString("bds_locale_update_last_checked", null)
+
+        enqueueAllLocales()
+        val second = sync.updateLanguages(1_700_000_000_000L)
+
+        throw AssertionError(
+            "written=" + second.getJSONArray("writtenKeys") +
+                " | checked=" + beforeChecked +
+                " | afterChecked=" + prefs.getString("bds_locale_update_last_checked", null) +
+                " | locales=" + beforeLocales +
+                " | afterLocales=" + prefs.getString("bds_locale_updates", null),
+        )
+    }
+
     // ── resetLanguages (BDS_RESET_LANGUAGES) ─────────────────────────────
 
     @Test
