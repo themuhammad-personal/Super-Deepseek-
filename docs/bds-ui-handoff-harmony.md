@@ -29,7 +29,7 @@ touched.
 |---|---|
 | Branch | `arena/01a0d81f-super-deepseek` |
 | Base | `main` @ `f4a8348931f2ad5e595fe701ffe0ebbe3282e415` |
-| Commits | `140e1ec` (audit/bug-fix pass) → `bfa2942` (restructure, 24 files, +1698/−697) → `3dd3e67` (Android e2e rework through the new entry points) → docs commit (this handoff, master prompt, tracking JSON, progress update) |
+| Commits | `140e1ec` (audit/bug-fix pass) → `bfa2942` (restructure, 24 files, +1698/−697) → `3dd3e67` (Android e2e rework through the new entry points) → `99fdf9a` (this handoff, master prompt, tracking JSON, progress update) |
 | CI | **run `36167256744` — success**: Unit tests ✔ · `build:android` ✔ · staged assets ✔ · Android WebView simulator suite ✔ · Kotlin unit tests ✔ · `assembleDebug` ✔ · artifacts uploaded |
 | Earlier red run | `36163210120` failed in the Android job only because the committed e2e helper waited for a *visible* `#bds-drawer` while the drawer renders hidden (`bds-closed`). Reproduced locally, fixed, and superseded by the green run. |
 

@@ -16,7 +16,7 @@
       "scope": "android.spec.js, helpers/android.js, new SidebarSearch suite, AdvancedSettings suite rename"
     },
     {
-      "sha": "<docs commit>",
+      "sha": "99fdf9a",
       "title": "docs: master prompt, tracking JSON, progress update, handoff + a11y label fix",
       "scope": "docs/*.md, docs/bds-ui-tracking.json, PluginsSettings label associations"
     }

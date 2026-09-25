@@ -5,7 +5,7 @@
 **Better DeepSeek UI Restructure — status: complete, verified, pushed.**
 
 Branch `arena/01a0d81f-super-deepseek` (base `main` @ `f4a8348`), commits
-`bfa2942` → `3dd3e67` → docs commit. CI **run 36167256744 is green end-to-end**:
+`bfa2942` → `3dd3e67` → `99fdf9a` (docs). CI **run 36167256744 is green end-to-end**:
 Unit tests, Android web bundle build, staged-asset check, Android WebView
 simulator suite, Kotlin unit tests, and `assembleDebug`.
 
