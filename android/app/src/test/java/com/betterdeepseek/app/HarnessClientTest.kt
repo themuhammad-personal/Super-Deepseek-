@@ -136,10 +136,22 @@ class HarnessClientTest {
             server.enqueue(
                 MockResponse().setBody("""{"result":{"ok":true,"value":{"sessionId":"s"}}}"""),
             )
+            // session.prompt is queued too, so the loop never waits on an empty
+            // MockWebServer queue (which would hang until the read timeout).
+            server.enqueue(MockResponse().setBody("""{"result":{"ok":true}}"""))
+
             val result = harness.executeTask(
                 JSONObject().put("baseUrl", base()).put("cwd", cwd).put("prompt", "do it"),
             )
+
             assertTrue("cwd should be accepted: $cwd", result.getBoolean("ok"))
+            val createBody = JSONObject(server.takeRequest().body.readUtf8())
+            assertEquals(
+                "cwd must be forwarded verbatim: $cwd",
+                cwd,
+                createBody.getJSONObject("payload").getString("cwd"),
+            )
+            assertEquals("session.prompt", JSONObject(server.takeRequest().body.readUtf8()).getString("method"))
         }
     }
 

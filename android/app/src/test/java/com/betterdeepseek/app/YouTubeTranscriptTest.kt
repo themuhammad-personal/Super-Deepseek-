@@ -184,7 +184,12 @@ class YouTubeTranscriptTest {
 
     @Test
     fun `caption baseUrl on non allowed host is rejected`() {
+        // fetchViaInnerTube swallows the rejection (like the npm package) and
+        // falls through to the watch page, which must reject it as well.
         server.enqueue(MockResponse().setBody(tracksJson("https://evil.example.com/timedtext")))
+        server.enqueue(
+            MockResponse().setBody(watchPageHtml(tracksJson("https://evil.example.com/timedtext"))),
+        )
 
         val ex = assertThrows(YouTubeTranscript.TranscriptException::class.java) {
             transcript.fetchTranscript("dQw4w9WgXcQ")
@@ -222,7 +227,11 @@ class YouTubeTranscriptTest {
 
     @Test
     fun `failed caption download status throws not available`() {
+        // InnerTube tracks -> caption download 404 -> InnerTube attempt gives up
+        // -> watch page -> its caption download 404 -> user-facing error.
         server.enqueue(MockResponse().setBody(tracksJson(captionUrl())))
+        server.enqueue(MockResponse().setResponseCode(404))
+        server.enqueue(MockResponse().setBody(watchPageHtml(tracksJson(captionUrl()))))
         server.enqueue(MockResponse().setResponseCode(404))
 
         val ex = assertThrows(YouTubeTranscript.TranscriptException::class.java) {

@@ -288,6 +288,7 @@ class WebViewBridgeDispatchTest {
     @Test
     fun `fetch dispatches EXECUTE HARNESS TASK with nested payload`() {
         server.enqueue(MockResponse().setBody("""{"result":{"ok":true,"value":{"sessionId":"s9"}}}"""))
+        server.enqueue(MockResponse().setBody("""{"result":{"ok":true}}"""))
 
         val out = JSONObject(
             bridge.fetch(

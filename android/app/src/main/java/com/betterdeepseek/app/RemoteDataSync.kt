@@ -262,15 +262,50 @@ internal class RemoteDataSync(
         }
     }
 
+    /**
+     * Port of the extension's `deepEqual` (`src/lib/deep-equal.js`): structural
+     * JSON equality, objects key-order independent, arrays compared by index.
+     *
+     * org.json's JSONObject/JSONArray do not override `equals` (identity
+     * comparison), so delegating to it made every value look changed: the
+     * "write only what changed" contract of `computeDiff` was broken and every
+     * startup rewrote all keys.
+     */
     private fun deepEqualJson(a: Any?, b: Any?): Boolean {
         if (a === b) return true
-        if (a == null || b == null) return a == b
-        return when {
-            a is JSONObject && b is JSONObject -> a.equals(b)
-            a is JSONArray && b is JSONArray -> a.equals(b)
-            a is Number && b is Number -> a.toLong() == b.toLong()
-            else -> a.equals(b)
+        if (a == null || b == null) return false
+
+        val aIsObject = a is JSONObject
+        val bIsObject = b is JSONObject
+        if (aIsObject || bIsObject) {
+            if (!aIsObject || !bIsObject) return false
+            val left = a as JSONObject
+            val right = b as JSONObject
+            val aKeys = left.keys().asSequence().sorted()
+            val bKeys = right.keys().asSequence().sorted()
+            if (aKeys != bKeys) return false
+            for (key in aKeys) {
+                if (!deepEqualJson(left.opt(key), right.opt(key))) return false
+            }
+            return true
         }
+
+        val aIsArray = a is JSONArray
+        val bIsArray = b is JSONArray
+        if (aIsArray || bIsArray) {
+            if (!aIsArray || !bIsArray) return false
+            val left = a as JSONArray
+            val right = b as JSONArray
+            if (left.length() != right.length()) return false
+            for (index in 0 until left.length()) {
+                if (!deepEqualJson(left.opt(index), right.opt(index))) return false
+            }
+            return true
+        }
+
+        // JS `===` on numbers is numeric: 7 and 7.0 are equal.
+        if (a is Number && b is Number) return a.toDouble() == b.toDouble()
+        return a == b
     }
 
     private fun parseJsonObject(raw: String?): JSONObject? {
