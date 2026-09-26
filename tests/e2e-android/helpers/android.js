@@ -149,6 +149,22 @@ export const test = base.extend({
     ensureBuildExists();
     const context = await browser.newContext(contextOptions);
 
+    // Pre-page: record any boot error so a bundle that fails to start reports
+    // a real cause instead of a mysterious missing element.
+    await context.addInitScript({
+      content: `
+        (function () {
+          window.__bdsBootErrors = window.__bdsBootErrors || [];
+          window.addEventListener("error", function (event) {
+            window.__bdsBootErrors.push(String(event.message || event.error || "error"));
+          });
+          window.addEventListener("unhandledrejection", function (event) {
+            window.__bdsBootErrors.push("unhandledrejection: " + String(event.reason));
+          });
+        })();
+      `,
+    });
+
     // Pre-page: mock AndroidBridge.
     await context.addInitScript({ content: buildAndroidBridgeBootstrap() });
 
@@ -211,6 +227,21 @@ export const test = base.extend({
     // up-front (in its closed state), and the composer's Plus button is the BDS
     // surface that is always visible on first paint.
     await page.waitForSelector("#bds-drawer", { state: "attached" });
+    // Round-2 B.7: the content bundle signals readiness once it has mounted and
+    // completed its first scan. Waiting for that signal makes every test start
+    // from the same, fully-booted state instead of sampling a half-mounted DOM.
+    try {
+      await page.waitForFunction(() => (window.__bdsUiReadyCalls?.length ?? 0) > 0, null, {
+        timeout: 15_000,
+      });
+    } catch (error) {
+      const bootErrors = await page
+        .evaluate(() => window.__bdsBootErrors || [])
+        .catch(() => ["<page unreachable>"]);
+      throw new Error(
+        `BDS content bundle did not finish booting (${bootErrors.join(" | ") || "no error reported"})`,
+      );
+    }
     await page.waitForSelector(".bds-plus-btn");
     await expect(page.locator(".bds-plus-btn").first()).toBeInViewport();
     await use(page);

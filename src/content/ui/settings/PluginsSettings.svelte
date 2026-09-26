@@ -688,7 +688,7 @@
     await discoverMcpToolSchemas();
     pushConfigToPage();
     closeEditor();
-    formSnapshot = captureSnapshot();
+    formSnapshot = captureFormSnapshot();
   }
 
   async function deleteMcpServer(id) {

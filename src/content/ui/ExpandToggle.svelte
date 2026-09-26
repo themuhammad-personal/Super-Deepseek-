@@ -48,8 +48,18 @@
                       textarea.closest(".ds-textarea")?.parentElement ||
                       textarea.parentElement;
           
-          if (container && !container.style.position) {
-            container.style.position = "relative";
+          // The expand overlay is positioned against this container, so it needs
+          // a positioning context — but only when the page has not already
+          // established one. Reading the *inline* style (as this did) misses
+          // `position: fixed` coming from DeepSeek's stylesheet and replaced it,
+          // which un-fixed the whole composer and pushed it below the fold
+          // (caught by the Android E2E suite as a flaky "Plus button not in
+          // viewport"). Check the computed value instead.
+          if (container) {
+            const computedPosition = getComputedStyle(container)?.position;
+            if (!container.style.position && (!computedPosition || computedPosition === "static")) {
+              container.style.setProperty("position", "relative");
+            }
           }
           checkContent();
         }

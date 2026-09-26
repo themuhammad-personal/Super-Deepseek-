@@ -252,6 +252,10 @@ test("account popover stays reachable with a non-English (Bengali) DeepSeek UI",
     "লগ আউট",
   ]);
 
+  // Round-2 D: the native top app-download banner is hidden in this locale too
+  // (its label is translated, so this can only work structurally).
+  await expect(page.getByTestId("get-app-container")).toHaveAttribute("data-bds-hide", "");
+
   // The BDS entries really open the two screens.
   await page.locator(".bds-advanced-settings-option").click({ force: true });
   await expect(page.locator("#bds-drawer")).toHaveClass(/bds-open/);
@@ -395,6 +399,23 @@ test("composer hosts the upload trigger only, with no project or DeepCode icon",
   expect(row.anyDeepCodeMount).toBe(0);
 });
 
+test("Command Manager closes from its × button (Round-2 B.4)", async ({ page }) => {
+  await openDrawer(page);
+
+  // The drawer's own Commands section hosts the Manage toggle; scoped to the
+  // section so the Projects manager's button cannot be hit by mistake.
+  const manage = page.locator("#bds-section-commands button").filter({ hasText: /^Manage$/ });
+  await manage.first().evaluate((button) => button.click());
+
+  const manager = page.locator("#bds-drawer .bds-cmd-manager");
+  await expect(manager).toBeVisible();
+
+  await page.locator("#bds-drawer .bds-cmd-manager-close").evaluate((button) => button.click());
+
+  // Before the Round-2 fix the prop name mismatch made this button a no-op.
+  await expect(manager).toHaveCount(0);
+});
+
 test("Plus drawer Command card opens the command scope (Round-2 C.2)", async ({ page }) => {
   const errors = [];
   page.on("pageerror", (error) => errors.push(String(error)));
@@ -486,6 +507,36 @@ test("signals the native shell once BDS is ready (Round-2 B.7)", async ({ page }
   expect(state.plusMounted).toBe(true);
   // The native elements BDS hides are already hidden when the reveal happens.
   expect(state.bannerHidden).toBe(true);
+});
+
+test("composer stays in the viewport after the BDS polling settles", async ({ page }) => {
+  // The expand-toggle component polls for the editor every second and used to
+  // write `position: relative` onto the composer container, replacing DeepSeek's
+  // `position: fixed` and pushing the whole row below the fold. Verify the row
+  // is still on screen after that first poll.
+  await page.waitForTimeout(1400);
+
+  const state = await page.evaluate(() => {
+    const row = document.querySelector("#prompt-actions");
+    const plus = document.querySelector(".bds-plus-btn");
+    const rect = (el) => {
+      const r = el.getBoundingClientRect();
+      return { top: Math.round(r.top), bottom: Math.round(r.bottom), height: Math.round(r.height) };
+    };
+    return {
+      composerPosition: getComputedStyle(document.querySelector(".composer-shell")).position,
+      inlinePosition: document.querySelector(".composer-shell").style.position,
+      row: rect(row),
+      plus: rect(plus),
+      viewport: window.innerHeight,
+    };
+  });
+
+  expect(state.composerPosition).toBe("fixed");
+  expect(state.inlinePosition).toBe("");
+  expect(state.plus.bottom).toBeLessThanOrEqual(state.viewport);
+  expect(state.plus.top).toBeGreaterThanOrEqual(0);
+  await expect(page.locator(".bds-plus-btn").first()).toBeInViewport();
 });
 
 test("composer action row spreads its five icons evenly (Round-2 B.6)", async ({ page }) => {
