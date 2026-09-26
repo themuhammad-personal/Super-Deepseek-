@@ -3,8 +3,8 @@
    * BDS drawer — opened from the sidebar account/profile menu (BDS-UI F.4).
    *
    * It hosts the two physically separated settings systems:
-   *   · settings/AdvancedSettings.svelte  — every non-MCP setting
-   *   · settings/PluginsSettings.svelte   — MCP servers ("Plugins")
+   *   · settings/AdvancedSettings.svelte  — System Prompts + Skill Set
+   *   · settings/PluginsSettings.svelte   — the ten feature subsections incl. MCP
    * plus the skill / character / memory / project / saved-item sections, the
    * relocated commands area and the relocated Get BDS App / What's New entries.
    */
@@ -12,7 +12,6 @@
   import AdvancedSettings from "./settings/AdvancedSettings.svelte";
   import PluginsSettings from "./settings/PluginsSettings.svelte";
   import CharacterList from "./CharacterList.svelte";
-  import SkillList from "./SkillList.svelte";
   import MemoryList from "./MemoryList.svelte";
   import ProjectsManager from "./ProjectsManager.svelte";
   import ProjectsCard from "./ProjectsCard.svelte";
@@ -72,7 +71,6 @@
   let advancedRef = $state(null);
   let pluginsRef = $state(null);
   let charactersRef = $state(null);
-  let skillsRef = $state(null);
   let memoryRef = $state(null);
   let projectsManagerRef = $state(null);
   let savedItemsRef = $state(null);
@@ -92,20 +90,21 @@
     if (charactersRef) charactersRef.refresh();
   }
   export function refreshSkills() {
-    if (skillsRef) skillsRef.refresh();
+    // The Skill Set lives inside AdvancedSettings since the Round-2 scope fix.
+    if (advancedRef) advancedRef.refreshSkills();
   }
   export function refreshMemories() {
     if (memoryRef) memoryRef.refresh();
   }
   export function refreshProjects() {
     if (projectsManagerRef) projectsManagerRef.refresh();
-    if (advancedRef) advancedRef.refreshProject();
+    if (pluginsRef) pluginsRef.refreshProject();
   }
   export function refreshSavedItems() {
     if (savedItemsRef) savedItemsRef.refresh();
   }
   export function refreshCssSnippets() {
-    if (advancedRef) advancedRef.refreshCssSnippets();
+    if (pluginsRef) pluginsRef.refreshCssSnippets();
   }
 
   function openProjectsManager() {
@@ -130,7 +129,7 @@
     mcp: "bds-settings-plugins",
     commands: "bds-section-commands",
     deepcode: "bds-section-deepcode",
-    skills: "bds-section-skills",
+    skills: "bds-section-skills", // inside AdvancedSettings
     characters: "bds-section-characters",
     memories: "bds-section-memories",
     projects: "bds-section-projects",
@@ -211,8 +210,12 @@
     </div>
   {:else}
     <div class="bds-drawer-body">
-      <AdvancedSettings
-        bind:this={advancedRef}
+      <AdvancedSettings bind:this={advancedRef} onsave={handleSettingsSaved} />
+
+      <hr />
+
+      <PluginsSettings
+        bind:this={pluginsRef}
         onsave={handleSettingsSaved}
         onapiplayground={openApiPlayground}
         onimportdata={() => {
@@ -224,14 +227,6 @@
           refreshSavedItems();
         }}
       />
-
-      <PluginsSettings bind:this={pluginsRef} onsave={handleSettingsSaved} />
-
-      <hr />
-
-      <div class="bds-drawer-section" id="bds-section-skills">
-        <SkillList bind:this={skillsRef} />
-      </div>
 
       <hr />
 
