@@ -3,7 +3,9 @@
 Branch `arena/01a0d81f-super-deepseek` · base `main` @ `f4a8348`
 Commits: `e928145` (settings scope split) → `d081afa` (locale-proof native menu
 handling + banner) → `2a766f3` (autocomplete × composer + reveal gate) →
-`5f7e1f2` (locale-proof action-row detection).
+`5f7e1f2` (locale-proof action-row detection) → `e51cd47` (verification fixes:
+stale `captureSnapshot()`, composer `position: fixed` clobbered by the expand
+toggle, boot-readiness fixture).
 
 Everything below was reproduced, fixed and verified in this repository. The
 Android build and its Kotlin tests run in GitHub Actions (no JDK/Android SDK in
@@ -204,11 +206,17 @@ the existing Android E2E check.
 | --- | --- |
 | `npm run check-locales` | PASS — no missing keys in any locale |
 | `npm run build:android` | PASS (exit 0, 9 assets staged) |
-| `npm run test:unit` | PASS — **106 files / 1560 tests** |
-| Android WebView E2E | **31/31 PASS** (23 before + 8 new) |
-| Repeat runs | 3 consecutive full-suite green runs |
-| Kotlin/Robolectric | runs in CI (`npm run android:test`) |
-| Android E2E in CI | runs in CI (`test:e2e:android`) |
+| `npm run test:unit` | PASS — **107 files / 1562 tests** |
+| Android WebView E2E | **33/33 PASS** (23 before + 10 new) |
+| Repeat local runs | **6 consecutive full-suite green runs** |
+| GitHub **CI run 36219474658** (`e51cd47`) | **success** — Unit tests + Android job (web bundle, staged-asset check, Android WebView suite, **Kotlin unit tests incl. the new Robolectric reveal-gate suite**, `assembleDebug`, APK upload) |
+| GitHub **Build and Release run 36219473292** (`e51cd47`) | **success** — release APK `better-deepseek-android-signed-apk` = 5,537,943 bytes; CI debug APK `android-apk-debug` = 6,893,114 bytes |
+
+Earlier CI run **36218075978 failed** on the unit job with
+`ReferenceError: captureSnapshot is not defined` — a pre-split function name left
+behind in the new `PluginsSettings.svelte` MCP save path. It is fixed in
+`e51cd47` and the re-run is green; that failure is exactly why the CI run is part
+of this evidence rather than only local runs.
 
 New tests added this round: locale-proof menu detection (8), label re-check and
 trigger classification, banner rules (5), autocomplete event order (2),
@@ -216,6 +224,21 @@ CommandManager close (3), composer layout (3), reveal gate + bridge (10),
 ui-ready signalling (6), settings scope split (rewritten, 20), plus 8 Android
 E2E tests (Bengali account popover, Bengali chat menu, C.1 evidence + live
 switch, C.2 command/project, B.6 spacing, B.7 signal).
+
+## Defects found by the verification pass itself
+
+* **Stale function name** — `PluginsSettings.svelte` called `captureSnapshot()`
+  (the pre-split name) when saving an MCP server; caught by CI's unit job, fixed.
+* **Composer un-fixed** — `ExpandToggle` polls for the editor every second and
+  wrote `position: relative` onto the composer container whenever the *inline*
+  position was empty, replacing DeepSeek's `position: fixed` and pushing the
+  whole composer row (Plus button included) below the fold. This is why the E2E
+  suite flaked roughly once in five full runs, and on a real phone it means the
+  composer can disappear. It now checks the computed position, so a positioned
+  container is left alone. New unit test + new E2E test that waits out the poll.
+* **Flaky fixture** — the Android E2E page fixture now waits for the B.7
+  readiness signal (and reports captured boot errors if the bundle does not
+  start) instead of sampling a half-mounted DOM.
 
 ## Not fixed / to confirm on device
 
