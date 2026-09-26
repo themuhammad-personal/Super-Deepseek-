@@ -330,6 +330,9 @@
             remove: "Delete",
             getApp: "Get App",
             userEmail: "user@example.com",
+            upload: "Upload",
+            deepThink: "DeepThink",
+            search: "Search",
           },
           bn: {
             settings: "সেটিংস",
@@ -342,6 +345,9 @@
             remove: "মুছে ফেলুন",
             getApp: "অ্যাপটি নিন",
             userEmail: "user@example.com",
+            upload: "আপলোড",
+            deepThink: "ডিপ থিংক",
+            search: "অনুসন্ধান",
           },
         };
         const STRINGS = TRANSLATIONS[LANG] || TRANSLATIONS.en;
@@ -488,6 +494,21 @@
           });
 
           wireHistoryMenus();
+
+          // Round-2 C.1 fixture: the composer controls carry translated labels,
+          // so the scanner has to recognise them structurally.
+          const nativeUpload = document.querySelector(".native-attach-btn");
+          if (nativeUpload) nativeUpload.textContent = STRINGS.upload;
+          const deepthink = document.querySelector("#deepthink");
+          if (deepthink) {
+            deepthink.textContent = STRINGS.deepThink;
+            deepthink.setAttribute("aria-label", STRINGS.deepThink);
+          }
+          const websearch = document.querySelector("#websearch");
+          if (websearch) {
+            websearch.textContent = STRINGS.search;
+            websearch.setAttribute("aria-label", STRINGS.search);
+          }
 
           // Round-2 D fixture: the promotion's label is translated, the store
           // link is not — BDS must hide the bar in every language.
@@ -659,6 +680,39 @@
             getSendCount() {
               return sendCount;
             },
+            /**
+             * Round-2 C.1 fixture: simulates what DeepSeek does when the user
+             * switches the UI language — it re-renders the composer action row,
+             * which drops the BDS mount points React does not know about and
+             * rebuilds the native toggles with translated labels. BDS has to
+             * re-anchor its controls into the locked order on the next scan.
+             */
+            rerenderComposerForLanguage(lang) {
+              const next = TRANSLATIONS[lang] || TRANSLATIONS.en;
+              const row = document.querySelector("#prompt-actions");
+              if (!row) return null;
+
+              // React drops children it did not create.
+              row.querySelectorAll(".bds-attach-menu-mount, .bds-deep-research-mount")
+                .forEach((node) => node.remove());
+
+              // …and rebuilds the native controls (fresh nodes, same ids).
+              const nativeUpload = row.querySelector(".native-attach-btn");
+              if (nativeUpload) nativeUpload.textContent = next.upload;
+              const fileInput = row.querySelector("#native-file-input");
+              if (fileInput) fileInput.replaceWith(fileInput.cloneNode(true));
+              const deepthink = row.querySelector("#deepthink");
+              if (deepthink) {
+                deepthink.textContent = next.deepThink;
+                deepthink.setAttribute("aria-label", next.deepThink);
+              }
+              const websearch = row.querySelector("#websearch");
+              if (websearch) {
+                websearch.textContent = next.search;
+                websearch.setAttribute("aria-label", next.search);
+              }
+              return Array.from(row.children).length;
+            },
             lastSubmittedText: "",
           };
         }
@@ -733,8 +787,8 @@
       <div id="prompt-actions" class="mock-prompt-actions">
         <div class="native-attach-btn" role="button" tabindex="0">Native Upload</div>
         <input id="native-file-input" type="file" multiple />
-        <button id="deepthink" type="button" aria-label="DeepThink">DeepThink</button>
-        <button id="websearch" type="button" aria-label="Search">Search</button>
+        <button id="deepthink" class="ds-toggle-button" type="button" aria-label="DeepThink" aria-pressed="false">DeepThink</button>
+        <button id="websearch" class="ds-toggle-button" type="button" aria-label="Search" aria-pressed="false">Search</button>
         <button id="send-button" title="Send message" type="button">Send</button>
       </div>
     </section>

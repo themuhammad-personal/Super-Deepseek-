@@ -19,6 +19,9 @@
  *   getSystemLocale(): String
  *   downloadBlob(base64, mimeType, fileName): void
  *   reportTheme(isDark: Boolean): void  // live bar-icon colour update; persistence via setStorage
+ *   uiReady(): void  // Round-2 B.7 first-paint gate: BDS is mounted, the native
+ *     // shell may reveal the WebView. The shell also has its own safety timeout,
+ *     // so a missing call can never leave a blank screen. See src/android/ui-ready.js.
  *   pickFiles(mode: String, requestId: String): void
  *     // mode: "files" | "folder" | "files+images" | "folder+images";
  *     // v2/v2.1 result delivered as a CustomEvent series:

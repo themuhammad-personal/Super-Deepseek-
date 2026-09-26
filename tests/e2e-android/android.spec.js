@@ -55,6 +55,29 @@ function accountMenuLabels(page) {
     .filter({ hasNotText: /@/ });
 }
 
+/**
+ * Round-2 C.1: dev logging is opt-in through localStorage and is read when the
+ * content bundle starts, so the flag has to be set before the page loads.
+ * Returns the collected `[BDS:Composer]` lines.
+ */
+async function captureComposerLogs(page, url) {
+  const logs = [];
+  page.on("console", (message) => {
+    if (message.text().includes("[BDS:Composer]")) logs.push(message.text());
+  });
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem("bds:devlog", "true");
+    } catch {
+      /* storage disabled — the assertions on the log will then be skipped */
+    }
+  });
+  await page.goto(url);
+  await page.waitForSelector("#bds-drawer", { state: "attached" });
+  await page.waitForSelector(".bds-plus-btn");
+  return logs;
+}
+
 /** Loads the fixture in another DeepSeek UI language (Round-2 B.1 fixture). */
 async function gotoLocale(page, lang) {
   await page.goto(`https://chat.deepseek.com/?lang=${lang}`);
@@ -240,19 +263,9 @@ test("account popover stays reachable with a non-English (Bengali) DeepSeek UI",
 test("composer icon order survives a language switch (Round-2 C.1 evidence)", async ({
   page,
 }) => {
-  const logs = [];
-  page.on("console", (message) => {
-    const text = message.text();
-    if (text.includes("[BDS:Composer]")) logs.push(text);
-  });
-
   // Dev logging is opt-in through localStorage; the content script reads it on
   // start, exactly like the on-device chrome://inspect procedure.
-  await page.goto("https://chat.deepseek.com/?lang=bn");
-  await page.addInitScript(() => localStorage.setItem("bds:devlog", "true"));
-  await page.goto("https://chat.deepseek.com/?lang=bn");
-  await page.waitForSelector("#bds-drawer", { state: "attached" });
-  await page.waitForSelector(".bds-plus-btn");
+  const logs = await captureComposerLogs(page, "https://chat.deepseek.com/?lang=bn");
 
   await expect.poll(() => logs.length).toBeGreaterThan(0);
   await expect
@@ -278,6 +291,48 @@ test("composer icon order survives a language switch (Round-2 C.1 evidence)", as
   // structurally (SVG/class), not by its translated label.
   const matched = logs.find((line) => line.includes("deepthink control matched"));
   expect(matched, logs.join("\n")).toBeTruthy();
+});
+
+test("composer keeps its locked order after the UI language is switched (Round-2 C.1)", async ({
+  page,
+}) => {
+  const logs = await captureComposerLogs(page, "https://chat.deepseek.com/");
+
+  const orderOf = () =>
+    page.evaluate(() => {
+      const row = document.querySelector("#prompt-actions");
+      const nameOf = (child) => {
+        if (child.classList.contains("bds-attach-menu-mount")) return "plus";
+        if (child.classList.contains("bds-deep-research-mount")) return "deep-research";
+        if (child.id === "deepthink") return "deep-think";
+        if (child.id === "websearch") return "web-search";
+        if (child.id === "send-button") return "send";
+        return null;
+      };
+      return Array.from(row.children).map(nameOf).filter(Boolean);
+    });
+
+  const lockedOrder = ["plus", "deep-think", "web-search", "deep-research", "send"];
+  await expect.poll(orderOf).toEqual(lockedOrder);
+
+  // Switch the UI language: React rebuilds the row and drops the BDS mounts.
+  const afterSwitch = await page.evaluate(() => {
+    const before = document.querySelectorAll("#prompt-actions > *").length;
+    window.__mockDeepSeek.rerenderComposerForLanguage("bn");
+    const mountsLeft = document.querySelectorAll(
+      "#prompt-actions > .bds-attach-menu-mount, #prompt-actions > .bds-deep-research-mount",
+    ).length;
+    return { before, mountsLeft };
+  });
+  expect(afterSwitch.mountsLeft).toBe(0);
+  await expect(page.locator("#prompt-actions #deepthink")).toHaveText("ডিপ থিংক");
+
+  // BDS rescans and re-anchors its own controls into the same locked order.
+  await expect.poll(orderOf).toEqual(lockedOrder);
+  // …and the instrumentation shows the structural recognition that made it work.
+  await expect
+    .poll(() => logs.some((line) => line.includes("deepthink control matched")))
+    .toBe(true);
 });
 
 test("chat-row menu keeps Tags + Export with a non-English (Bengali) DeepSeek UI", async ({
@@ -344,7 +399,10 @@ test("Plus drawer Command card opens the command scope (Round-2 C.2)", async ({ 
   const errors = [];
   page.on("pageerror", (error) => errors.push(String(error)));
   page.on("console", (message) => {
-    if (message.type() === "error") errors.push(message.text());
+    // Network noise from the fixture is not an application error.
+    if (message.type() !== "error") return;
+    if (message.text().includes("Failed to load resource")) return;
+    errors.push(message.text());
   });
 
   await openUploadDrawer(page);
@@ -354,10 +412,10 @@ test("Plus drawer Command card opens the command scope (Round-2 C.2)", async ({ 
   await expect(page.locator(".bds-attach-dropdown .bds-ud-subheader")).toBeVisible();
   await expect(page.locator(".bds-attach-dropdown .bds-ud-back")).toBeVisible();
   // The list is built from the live registry, so at least one command shows up.
-  await expect(page.locator(".bds-attach-dropdown .bds-ud-command-item").first()).toBeVisible();
+  await expect(page.locator(".bds-attach-dropdown .bds-ud-command").first()).toBeVisible();
   // A command inserts its prefix into the editor and closes the drawer.
   await page
-    .locator(".bds-attach-dropdown .bds-ud-command-item")
+    .locator(".bds-attach-dropdown .bds-ud-command")
     .first()
     .evaluate((item) => item.click());
   await expect(page.locator(".bds-attach-dropdown")).toHaveCount(0);
@@ -371,26 +429,30 @@ test("Plus drawer Project card opens the project panel (Round-2 C.2)", async ({ 
   const errors = [];
   page.on("pageerror", (error) => errors.push(String(error)));
   page.on("console", (message) => {
-    if (message.type() === "error") errors.push(message.text());
+    // Network noise from the fixture is not an application error.
+    if (message.type() !== "error") return;
+    if (message.text().includes("Failed to load resource")) return;
+    errors.push(message.text());
   });
 
+  // Seeded through the same storage the Projects manager reads; the mock's
+  // storage lives in the page, so this must happen after load (a reload would
+  // wipe it — the storage-change listener is what pushes it into app state).
   await page.evaluate(() =>
     chrome.storage.local.set({
       bds_projects: [
         {
           id: "proj-panel",
           name: "Panel Project",
-          files: [],
+          description: "",
           customInstructions: "",
           createdAt: Date.now(),
           updatedAt: Date.now(),
         },
       ],
+      bds_project_files: [],
     }),
   );
-  await page.reload();
-  await page.waitForSelector("#bds-drawer", { state: "attached" });
-  await page.waitForSelector(".bds-plus-btn");
 
   await openUploadDrawer(page);
   await clickUploadCard(page, "Project");

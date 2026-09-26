@@ -806,6 +806,23 @@ function findDeepResearchControlsWrapper(fileInput, fallbackWrapper) {
 }
 
 function findNativePromptActionRow() {
+  const row = findPromptActionRowByToggle();
+  if (row) return row;
+
+  // Round-2 C.1 fallback: recognising the row must not depend on the Deep Think
+  // toggle at all. DeepSeek's labels are translated, so on a non-English UI the
+  // toggle could not be identified, the scanner fell back to the composer
+  // wrapper and the locked icon order changed. The send cluster is structural,
+  // so the row is derived from it instead.
+  const structuralRow = findPromptActionRowBySendCluster();
+  if (structuralRow) {
+    devLog("Composer", "action row = send-cluster fallback", describeElement(structuralRow));
+  }
+  return structuralRow;
+}
+
+/** Locates the action row through a control that looks like Deep Think. */
+function findPromptActionRowByToggle() {
   const editor = findComposerEditor();
   const controls = Array.from(
     document.querySelectorAll(
@@ -813,6 +830,7 @@ function findNativePromptActionRow() {
     ),
   );
 
+  let candidate = null;
   for (const control of controls) {
     if (control.closest("#bds-root")) {
       continue;
@@ -826,10 +844,11 @@ function findNativePromptActionRow() {
       continue;
     }
 
-    // C.1 evidence: which control was recognised as Deep Think and which row it
-    // resolved to. A non-English UI changes the *label*, never this node — so a
-    // missing entry here is what points at a detection (not a layout) problem.
     const row = findControlsRowFor(control, editor);
+    // C.1 evidence: which control was recognised and which row it resolved to.
+    // A non-English UI changes the *label*, never the node — so a missing entry
+    // here (or a row without a send cluster) is what points at a detection, not
+    // a layout, problem.
     devLog(
       "Composer",
       "deepthink control matched:",
@@ -837,12 +856,46 @@ function findNativePromptActionRow() {
       "-> row:",
       describeElement(row),
     );
-    if (row) {
-      return row;
-    }
+    if (!row) continue;
+
+    // The row that also owns the send control is the best answer; a row that
+    // does not (layouts where Send sits in its own cluster) is still used, as
+    // it was before this diagnosis.
+    if (rowHasSendCluster(row)) return row;
+    candidate ||= row;
+  }
+
+  return candidate;
+}
+
+/**
+ * The row that owns the send button and at least one sibling control — the same
+ * shape the toggle path looks for, found without reading any label.
+ */
+function findPromptActionRowBySendCluster() {
+  const editor = findComposerEditor();
+  const sendButton = findDeepSeekSendButton() || findDeepSeekStopButton();
+  if (!sendButton || sendButton.closest?.("#bds-root")) return null;
+
+  let node = sendButton.parentElement;
+  let depth = 0;
+  while (node && node !== document.body && depth < 6) {
+    if (node.closest("#bds-root")) return null;
+    if (editor && node.contains(editor)) return null;
+    if (countPromptControls(node) > 1) return node;
+    node = node.parentElement;
+    depth += 1;
   }
 
   return null;
+}
+
+/** True when the row actually holds the send/stop control. */
+function rowHasSendCluster(row) {
+  if (!row) return false;
+  const sendButton = findDeepSeekSendButton() || findDeepSeekStopButton();
+  if (!sendButton) return true;
+  return row.contains(sendButton);
 }
 
 function findComposerEditor() {
@@ -878,19 +931,32 @@ function isAfterNode(reference, candidate) {
 }
 
 function isDeepThinkControl(control) {
-  // Match by class and SVG path (preferred, language-independent)
-  const hasToggleClass = control.classList?.contains("ds-toggle-button") || 
-                         control.querySelector?.(".ds-toggle-button");
-  if (hasToggleClass && control.querySelector?.('svg path[d*="M7.0643"]')) {
+  // T1 · DeepSeek's own toggle class. Language-independent, and the signal the
+  // original code already knew about.
+  if (control.classList?.contains("ds-toggle-button")) {
+    return true;
+  }
+  if (control.querySelector?.(".ds-toggle-button")) {
     return true;
   }
 
-  // Fallback to direct SVG path match
+  // T2 · the documented SVG path of the Deep Think glyph.
   if (control.querySelector?.('svg path[d*="M7.0643"]')) {
     return true;
   }
 
-  // Fallback for test environments (English label text)
+  // T3 · toggle semantics. aria-pressed / role=switch survive translation, and
+  // the caller additionally requires the resolved row to hold a send cluster,
+  // so an unrelated pressed button elsewhere cannot win.
+  const ariaPressed = control.getAttribute?.("aria-pressed");
+  if (ariaPressed === "true" || ariaPressed === "false") {
+    return true;
+  }
+  if (control.getAttribute?.("role") === "switch") {
+    return true;
+  }
+
+  // T4 · English label, best effort for exotic markup (and the jsdom suites).
   const text = normalizePromptControlText(control.textContent);
   const label = normalizePromptControlText(
     `${control.getAttribute("aria-label") || ""} ${control.getAttribute("title") || ""}`,
