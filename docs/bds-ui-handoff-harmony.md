@@ -29,8 +29,9 @@ touched.
 |---|---|
 | Branch | `arena/01a0d81f-super-deepseek` |
 | Base | `main` @ `f4a8348931f2ad5e595fe701ffe0ebbe3282e415` |
-| Commits | `140e1ec` (audit/bug-fix pass) → `bfa2942` (restructure, 24 files, +1698/−697) → `3dd3e67` (Android e2e rework through the new entry points) → `99fdf9a` (this handoff, master prompt, tracking JSON, progress update) |
+| Commits | `140e1ec` (audit/bug-fix pass) → `bfa2942` (restructure, 24 files, +1698/−697) → `3dd3e67` (Android e2e rework through the new entry points) → `99fdf9a` (this handoff, master prompt, tracking JSON, progress update) → `4414c94` (SHA bookkeeping) → `6b3ff74` (temporary `arena/**` release trigger) |
 | CI | **run `36167256744` — success**: Unit tests ✔ · `build:android` ✔ · staged assets ✔ · Android WebView simulator suite ✔ · Kotlin unit tests ✔ · `assembleDebug` ✔ · artifacts uploaded |
+| Release APK | **run `36208831285` — success**, artifact `better-deepseek-android-signed-apk` (5,533,785 bytes → `better-deepseek-android-v0.1.14-signed.apk`). **Unsigned**: the `BDS_KEYSTORE` / `BDS_KEYSTORE_PASSWORD` / `BDS_KEY_ALIAS` / `BDS_KEY_PASSWORD` secrets are not configured, so the workflow warns and skips `apksigner verify`. Configuring those four secrets makes the same run produce an installable signed APK. The CI job's `android-apk-debug` artifact (6,887,890 bytes) is debug-key signed and installable now. |
 | Earlier red run | `36163210120` failed in the Android job only because the committed e2e helper waited for a *visible* `#bds-drawer` while the drawer renders hidden (`bds-closed`). Reproduced locally, fixed, and superseded by the green run. |
 
 ## 3. Verification method (truthful, no hand-waving)
@@ -114,9 +115,12 @@ deliberately removed afterwards.
    warnings; the three that `PluginsSettings.svelte` introduced were fixed
    (labels now target their inputs). The rest were left untouched to keep this
    change set reviewable.
-5. **Release APK.** Ask me (or anyone with admin scope) to re-enable the
-   temporary `arena/**` trigger — or dispatch the workflow manually — if you
-   want a signed APK produced from this branch; CI already uploads the debug APK.
+5. **Release APK / signing.** The release APK was built from this branch (run
+   `36208831285`), but it is **unsigned** until the four keystore secrets are
+   added; `gh workflow run` returns 403 and the default branch has no workflow
+   files, so the only working trigger is the temporary `arena/**` push entry in
+   `release.yml` — **remove it before merging to main** (it is commented as such).
+   The debug APK artifact from the CI job is installable in the meantime.
 
 ## 7. Files most worth reading first
 
