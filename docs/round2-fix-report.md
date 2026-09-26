@@ -211,13 +211,16 @@ the existing Android E2E check.
 | Repeat local runs | **6 consecutive full-suite green runs** |
 | GitHub **CI run 36219474658** (`e51cd47`) | **success** — Unit tests + Android job (web bundle, staged-asset check, Android WebView suite, **Kotlin unit tests incl. the new Robolectric reveal-gate suite**, `assembleDebug`, APK upload) |
 | GitHub **Build and Release run 36219473292** (`e51cd47`) | **success** — release APK 5,537,943 bytes |
-| GitHub **CI run 36219822537** (final tip `2d8f0a7`) | **success** — `android-apk-debug` = **6,893,116 bytes** (installable, debug-signed) |
-| GitHub **Build and Release run 36219820343** (final tip `2d8f0a7`) | **success** — `better-deepseek-android-signed-apk` = 5,537,973 bytes (**unsigned**, as before) |
+| GitHub **CI run 36220100259** (tip `ef77b2a`) | **success** — `android-apk-debug` = **6,893,096 bytes** (installable, debug-signed) |
+| GitHub **Build and Release run 36220096722** (tip `ef77b2a`) | **success** — `better-deepseek-android-signed-apk` = 5,537,921 bytes (**unsigned**, as before) |
+
+Every run listed above is green; the tip of the branch
+(`ef77b2a`) is the state this report describes.
 
 **Download links.** Debug APK (install this one):
-`https://github.com/themuhammad-personal/Super-Deepseek-/actions/runs/36219822537`
+`https://github.com/themuhammad-personal/Super-Deepseek-/actions/runs/36220100259`
 → Artifacts → `android-apk-debug`. Release (unsigned) APK:
-`https://github.com/themuhammad-personal/Super-Deepseek-/actions/runs/36219820343`
+`https://github.com/themuhammad-personal/Super-Deepseek-/actions/runs/36220096722`
 → Artifacts → `better-deepseek-android-signed-apk`.
 
 Earlier CI run **36218075978 failed** on the unit job with
