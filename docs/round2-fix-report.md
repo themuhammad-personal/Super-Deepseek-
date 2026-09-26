@@ -210,7 +210,15 @@ the existing Android E2E check.
 | Android WebView E2E | **33/33 PASS** (23 before + 10 new) |
 | Repeat local runs | **6 consecutive full-suite green runs** |
 | GitHub **CI run 36219474658** (`e51cd47`) | **success** — Unit tests + Android job (web bundle, staged-asset check, Android WebView suite, **Kotlin unit tests incl. the new Robolectric reveal-gate suite**, `assembleDebug`, APK upload) |
-| GitHub **Build and Release run 36219473292** (`e51cd47`) | **success** — release APK `better-deepseek-android-signed-apk` = 5,537,943 bytes; CI debug APK `android-apk-debug` = 6,893,114 bytes |
+| GitHub **Build and Release run 36219473292** (`e51cd47`) | **success** — release APK 5,537,943 bytes |
+| GitHub **CI run 36219822537** (final tip `2d8f0a7`) | **success** — `android-apk-debug` = **6,893,116 bytes** (installable, debug-signed) |
+| GitHub **Build and Release run 36219820343** (final tip `2d8f0a7`) | **success** — `better-deepseek-android-signed-apk` = 5,537,973 bytes (**unsigned**, as before) |
+
+**Download links.** Debug APK (install this one):
+`https://github.com/themuhammad-personal/Super-Deepseek-/actions/runs/36219822537`
+→ Artifacts → `android-apk-debug`. Release (unsigned) APK:
+`https://github.com/themuhammad-personal/Super-Deepseek-/actions/runs/36219820343`
+→ Artifacts → `better-deepseek-android-signed-apk`.
 
 Earlier CI run **36218075978 failed** on the unit job with
 `ReferenceError: captureSnapshot is not defined` — a pre-split function name left
