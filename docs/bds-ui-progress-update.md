@@ -18,8 +18,8 @@ Android simulator suite 23/23 PASS across five consecutive full runs.
 (5,533,785 bytes → `better-deepseek-android-v0.1.14-signed.apk`). It is
 **unsigned**, because `BDS_KEYSTORE` and friends are not configured — add the
 four secrets in *Settings → Secrets and variables → Actions* and re-run to get
-an installable signed APK; the CI job's `android-apk-debug` artifact
-(6,887,890 bytes) is debug-key signed and installable in the meantime.
+an installable signed APK — owner decision: keep it as-is and install the CI
+debug APK instead (`android-apk-debug`, 6,887,898 bytes, run **36209081618**).
 `gh workflow run` returns HTTP 403 and the default branch carries no workflow
 files, so the build went through the temporary `arena/**` push trigger (same
 route as the Task-1 release build) — it stays in place for now and must be

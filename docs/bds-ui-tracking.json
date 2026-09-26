@@ -208,7 +208,8 @@
       "signed": false,
       "signing_note": "Annotation: 'android/ci-release.jks is missing (BDS_KEYSTORE secret not configured) - the release APK is unsigned; skipping signature verification.' An unsigned APK cannot be installed on a device; the CI job's android-apk-debug artifact (6,887,890 bytes) is debug-key signed and installable.",
       "trigger_note": "gh workflow run release.yml -> HTTP 403 (integration token), so the build used the same temporary arena/** push trigger as the Task-1 release build.",
-      "download_note": "Artifacts are served from *.blob.core.windows.net, which is unreachable from this sandbox; download from the Actions UI."
+      "download_note": "Artifacts are served from *.blob.core.windows.net, which is unreachable from this sandbox; download from the Actions UI.",
+      "decision": "Owner decision (2026-09-26): keep the release APK as-is (unsigned) and install the CI debug APK instead. No keystore secrets were added and no debug-key signing fallback was introduced into the release workflow."
     },
     "ci_run_after_release_build": {
       "run_id": 36208833048,
@@ -221,12 +222,22 @@
         "android-unit-test-report": 56200,
         "playwright-report-android": 244763
       }
+    },
+    "installable_apk": {
+      "source": "CI workflow 'CI' (Android job)",
+      "run_id": 36209081618,
+      "commit": "aed440d",
+      "artifact": "android-apk-debug",
+      "artifact_size_bytes": 6887898,
+      "path_inside_artifact": "app-debug.apk",
+      "signing": "debug keystore (installable)",
+      "download_url": "https://github.com/themuhammad-personal/Super-Deepseek-/actions/runs/36209081618"
     }
   },
   "open_items": [
     {
       "item": "Release workflow build for this branch",
-      "detail": "Built: Build and Release run 36208831285 (run #2) succeeded on 6b3ff74 and uploaded better-deepseek-android-signed-apk (5,533,785 bytes / better-deepseek-android-v0.1.14-signed.apk). It is UNSIGNED because the BDS_KEYSTORE/BDS_KEYSTORE_PASSWORD/BDS_KEY_ALIAS/BDS_KEY_PASSWORD secrets are not configured; add them in repo Settings -> Secrets and variables -> Actions and re-run to get an installable signed APK. The temporary arena/** push trigger is still in place and must be removed before merging to main.",
+      "detail": "Built: Build and Release run 36208831285 (run #2) succeeded on 6b3ff74 and uploaded better-deepseek-android-signed-apk (5,533,785 bytes / better-deepseek-android-v0.1.14-signed.apk). It is UNSIGNED because the BDS_KEYSTORE/BDS_KEYSTORE_PASSWORD/BDS_KEY_ALIAS/BDS_KEY_PASSWORD secrets are not configured; add them in repo Settings -> Secrets and variables -> Actions and re-run to get an installable signed APK. The temporary arena/** push trigger is still in place and must be removed before merging to main. Owner decision: keep the unsigned release build and the temporary arena/** trigger for now; use the CI debug APK (android-apk-debug, run 36209081618) for installs.",
       "needs_confirmation": true
     },
     {
