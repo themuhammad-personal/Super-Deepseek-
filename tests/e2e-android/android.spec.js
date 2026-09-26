@@ -42,6 +42,26 @@ async function openDrawer(page) {
   await expect(page.locator("#bds-drawer #bds-skill-upload")).toHaveCount(1);
 }
 
+/**
+ * Round-2 B.1: rows of the account popover that survive BDS's cleanup — the
+ * native entries BDS hides positionally carry `data-bds-hidden-entry`. The
+ * signed-in user block is not a menu entry, so it is filtered out by label.
+ */
+function accountMenuLabels(page) {
+  return page
+    .locator(
+      ".ds-dropdown-menu .ds-dropdown-menu-option:not([data-bds-hidden-entry]) .ds-dropdown-menu-option__label",
+    )
+    .filter({ hasNotText: /@/ });
+}
+
+/** Loads the fixture in another DeepSeek UI language (Round-2 B.1 fixture). */
+async function gotoLocale(page, lang) {
+  await page.goto(`https://chat.deepseek.com/?lang=${lang}`);
+  await page.waitForSelector("#bds-drawer", { state: "attached" });
+  await page.waitForSelector(".bds-plus-btn");
+}
+
 /** "Import" button of one drawer section (skills / characters / memories). */
 function sectionImportButton(page, sectionId) {
   return page
@@ -166,19 +186,128 @@ test("account menu carries Plugins + Advanced Settings and no relocated entries"
 }) => {
   await page.locator("#mock-settings-trigger").click({ force: true });
 
-  const labels = page.locator(".ds-dropdown-menu .ds-dropdown-menu-option__label");
-  await expect(labels.filter({ hasText: /^Plugins$/ })).toHaveCount(1);
-  await expect(labels.filter({ hasText: /^Advanced Settings$/ })).toHaveCount(1);
-  // BDS-UI F.5: these moved to the drawer footer, the account menu must not
-  // carry them any more (and the native "Download mobile App" stays untouched).
+  const labels = accountMenuLabels(page);
+  await expect(labels).toHaveText([
+    "Plugins",
+    "Advanced Settings",
+    "Official Settings",
+    "Log out",
+  ]);
+  // BDS-UI F.5: Get BDS App / What's New moved to the drawer footer.
   await expect(page.locator(".bds-get-app-option")).toHaveCount(0);
   await expect(page.locator(".bds-whats-new-option")).toHaveCount(0);
-  await expect(labels.filter({ hasText: /^Download mobile App$/ })).toHaveCount(1);
-  await expect(labels.filter({ hasText: /^Log out$/ })).toHaveCount(1);
+  // Round-2 B.1/B.2: the extra native entries are hidden positionally — their
+  // translated labels are never matched — and the signed-in user block stays.
+  await expect(
+    page.locator('.ds-dropdown-menu .ds-dropdown-menu-option[data-testid="drawer-item-report"]'),
+  ).toHaveAttribute("data-bds-hidden-entry", "");
+  await expect(
+    page.locator('.ds-dropdown-menu .ds-dropdown-menu-option[data-testid="drawer-item-download"]'),
+  ).toHaveAttribute("data-bds-hidden-entry", "");
+  await expect(page.locator('.ds-dropdown-menu .ds-avatar')).toHaveCount(1);
+  // Tags / Export must never leak into the account popover.
+  await expect(page.locator(".ds-dropdown-menu .bds-tags-option")).toHaveCount(0);
+  await expect(page.locator(".ds-dropdown-menu .bds-export-option")).toHaveCount(0);
 
   await page.locator(".bds-plugins-option").click({ force: true });
   await expect(page.locator("#bds-drawer")).toHaveClass(/bds-open/);
   await expect(page.locator("#bds-settings-plugins")).toBeVisible();
+});
+
+test("account popover stays reachable with a non-English (Bengali) DeepSeek UI", async ({
+  page,
+}) => {
+  await gotoLocale(page, "bn");
+
+  await page.locator("#mock-settings-trigger").click({ force: true });
+
+  // Exactly Plugins / Advanced Settings / Official Settings / Bengali Log out.
+  await expect(accountMenuLabels(page)).toHaveText([
+    "Plugins",
+    "Advanced Settings",
+    "Official Settings",
+    "লগ আউট",
+  ]);
+
+  // The BDS entries really open the two screens.
+  await page.locator(".bds-advanced-settings-option").click({ force: true });
+  await expect(page.locator("#bds-drawer")).toHaveClass(/bds-open/);
+  await expect(page.locator("#bds-settings-advanced")).toBeVisible();
+  // …and the Skill Set still lives inside Advanced Settings (Round-2 B.5).
+  await expect(page.locator("#bds-drawer #bds-skill-upload")).toHaveCount(1);
+});
+
+test("composer icon order survives a language switch (Round-2 C.1 evidence)", async ({
+  page,
+}) => {
+  const logs = [];
+  page.on("console", (message) => {
+    const text = message.text();
+    if (text.includes("[BDS:Composer]")) logs.push(text);
+  });
+
+  // Dev logging is opt-in through localStorage; the content script reads it on
+  // start, exactly like the on-device chrome://inspect procedure.
+  await page.goto("https://chat.deepseek.com/?lang=bn");
+  await page.addInitScript(() => localStorage.setItem("bds:devlog", "true"));
+  await page.goto("https://chat.deepseek.com/?lang=bn");
+  await page.waitForSelector("#bds-drawer", { state: "attached" });
+  await page.waitForSelector(".bds-plus-btn");
+
+  await expect.poll(() => logs.length).toBeGreaterThan(0);
+  await expect
+    .poll(() => logs.some((line) => line.includes("order")))
+    .toBe(true);
+
+  const order = await page.evaluate(() => {
+    const row = document.querySelector("#prompt-actions");
+    const nameOf = (child) => {
+      if (child.classList.contains("bds-attach-menu-mount")) return "plus";
+      if (child.classList.contains("bds-deep-research-mount")) return "deep-research";
+      if (child.id === "deepthink") return "deep-think";
+      if (child.id === "websearch") return "web-search";
+      if (child.id === "send-button") return "send";
+      return null;
+    };
+    return Array.from(row.children).map(nameOf).filter(Boolean);
+  });
+
+  // Locked order (BDS-UI E.1) in a non-English UI, same as in English.
+  expect(order).toEqual(["plus", "deep-think", "web-search", "deep-research", "send"]);
+  // The instrumentation itself must show the Deep Think control was recognised
+  // structurally (SVG/class), not by its translated label.
+  const matched = logs.find((line) => line.includes("deepthink control matched"));
+  expect(matched, logs.join("\n")).toBeTruthy();
+});
+
+test("chat-row menu keeps Tags + Export with a non-English (Bengali) DeepSeek UI", async ({
+  page,
+}) => {
+  await gotoLocale(page, "bn");
+
+  await page.locator("div._2090548").first().click({ force: true });
+
+  const labels = page.locator(".ds-dropdown-menu .ds-dropdown-menu-option__label");
+  await expect(labels.filter({ hasText: "Tags (BDS)" })).toHaveCount(1);
+  await expect(labels.filter({ hasText: "Export Chat (BDS)" })).toHaveCount(1);
+  await expect(labels.filter({ hasText: "মুছে ফেলুন" })).toHaveCount(1);
+  // The account entries stay out of the chat menu.
+  await expect(page.locator(".ds-dropdown-menu .bds-plugins-option")).toHaveCount(0);
+
+  // Tags / Export sit above the destructive (last) row — matched without
+  // reading the translated "Delete" label.
+  const order = await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll(".ds-dropdown-menu .ds-dropdown-menu-option"));
+    return rows.map((row) => {
+      if (row.classList.contains("bds-tags-option")) return "tags";
+      if (row.classList.contains("bds-export-option")) return "export";
+      return "native";
+    });
+  });
+  expect(order.filter((kind) => kind === "native")).toHaveLength(4);
+  expect(order.indexOf("tags")).toBeGreaterThan(-1);
+  expect(order.indexOf("export")).toBeGreaterThan(order.indexOf("tags"));
+  expect(order.indexOf("export")).toBeLessThan(order.lastIndexOf("native"));
 });
 
 test("composer hosts the upload trigger only, with no project or DeepCode icon", async ({
@@ -209,6 +338,132 @@ test("composer hosts the upload trigger only, with no project or DeepCode icon",
   expect(row.projectButtons).toBe(0);
   expect(row.composerDeepCode).toBe(0);
   expect(row.anyDeepCodeMount).toBe(0);
+});
+
+test("Plus drawer Command card opens the command scope (Round-2 C.2)", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(String(error)));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+
+  await openUploadDrawer(page);
+  await clickUploadCard(page, "Command");
+
+  // The card swaps the drawer into the command list (BDS-UI F.2).
+  await expect(page.locator(".bds-attach-dropdown .bds-ud-subheader")).toBeVisible();
+  await expect(page.locator(".bds-attach-dropdown .bds-ud-back")).toBeVisible();
+  // The list is built from the live registry, so at least one command shows up.
+  await expect(page.locator(".bds-attach-dropdown .bds-ud-command-item").first()).toBeVisible();
+  // A command inserts its prefix into the editor and closes the drawer.
+  await page
+    .locator(".bds-attach-dropdown .bds-ud-command-item")
+    .first()
+    .evaluate((item) => item.click());
+  await expect(page.locator(".bds-attach-dropdown")).toHaveCount(0);
+  const editor = await page.locator("#chat-input").inputValue();
+  expect(editor.startsWith("/")).toBe(true);
+
+  expect(errors, errors.join("\n")).toEqual([]);
+});
+
+test("Plus drawer Project card opens the project panel (Round-2 C.2)", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(String(error)));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+
+  await page.evaluate(() =>
+    chrome.storage.local.set({
+      bds_projects: [
+        {
+          id: "proj-panel",
+          name: "Panel Project",
+          files: [],
+          customInstructions: "",
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+      ],
+    }),
+  );
+  await page.reload();
+  await page.waitForSelector("#bds-drawer", { state: "attached" });
+  await page.waitForSelector(".bds-plus-btn");
+
+  await openUploadDrawer(page);
+  await clickUploadCard(page, "Project");
+
+  await expect(page.locator(".bds-project-panel")).toBeVisible();
+  await expect(page.locator(".bds-project-panel .bds-pp-select")).toBeVisible();
+  await expect(page.locator(".bds-project-panel")).toContainText("Panel Project");
+
+  expect(errors, errors.join("\n")).toEqual([]);
+});
+
+test("signals the native shell once BDS is ready (Round-2 B.7)", async ({ page }) => {
+  // The content bundle runs at DOMContentLoaded; the signal follows the first
+  // scan plus two animation frames.
+  await expect
+    .poll(async () => page.evaluate(() => window.__bdsUiReadyCalls?.length ?? 0))
+    .toBeGreaterThan(0);
+
+  const state = await page.evaluate(() => ({
+    calls: window.__bdsUiReadyCalls.length,
+    bootstrapped: Boolean(document.querySelector("#bds-root")),
+    plusMounted: Boolean(document.querySelector(".bds-plus-btn")),
+    bannerHidden: Boolean(
+      document.querySelector('[data-testid="get-app-container"]')?.hasAttribute("data-bds-hide"),
+    ),
+  }));
+
+  // Exactly one signal per page load, and it only fires once BDS is on screen.
+  expect(state.calls).toBe(1);
+  expect(state.bootstrapped).toBe(true);
+  expect(state.plusMounted).toBe(true);
+  // The native elements BDS hides are already hidden when the reveal happens.
+  expect(state.bannerHidden).toBe(true);
+});
+
+test("composer action row spreads its five icons evenly (Round-2 B.6)", async ({ page }) => {
+  const layout = await page.evaluate(() => {
+    const row = document.querySelector("#prompt-actions");
+    // The icon mounts can be `display: contents`, so measure the real controls.
+    const icons = [
+      ["plus", document.querySelector(".bds-attach-menu-mount .bds-plus-btn")],
+      ["deep-think", document.querySelector("#deepthink")],
+      ["web-search", document.querySelector("#websearch")],
+      ["deep-research", document.querySelector(".bds-deep-research-mount .bds-deep-research-toggle")],
+      ["send", document.querySelector("#send-button")],
+    ];
+    const rects = icons.map(([, el]) => el.getBoundingClientRect());
+    const gaps = rects
+      .slice(1)
+      .map((rect, index) => Math.round(rect.left - (rects[index].left + rects[index].width)));
+    const style = getComputedStyle(row);
+    return {
+      marker: row.getAttribute("data-bds-icon-row"),
+      display: style.display,
+      justify: style.justifyContent,
+      allInRow: icons.every(([, el]) => row.contains(el)),
+      order: icons.map(([name]) => name),
+      gaps,
+      rowWidth: Math.round(row.getBoundingClientRect().width),
+      iconsWidth: Math.round(rects.reduce((total, rect) => total + rect.width, 0)),
+    };
+  });
+
+  // Five icons, locked order, inside one row…
+  expect(layout.order).toEqual(["plus", "deep-think", "web-search", "deep-research", "send"]);
+  expect(layout.allInRow).toBe(true);
+  expect(layout.marker).toBe("1");
+  expect(layout.display).toBe("flex");
+  expect(layout.justify).toBe("space-between");
+  // …spread over the whole row with equal gaps.
+  expect(layout.iconsWidth).toBeLessThan(layout.rowWidth);
+  expect(layout.gaps).toHaveLength(4);
+  expect(Math.max(...layout.gaps) - Math.min(...layout.gaps)).toBeLessThanOrEqual(1);
 });
 
 test("Upload File on Android uses native picker bridge and injects markdown", async ({ page }) => {

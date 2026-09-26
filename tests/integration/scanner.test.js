@@ -208,6 +208,83 @@ describe("scanner input controls", () => {
     expect(mountMock.mock.calls[0][0]).toBe(deepResearchToggleMock);
   });
 
+  it("spreads the five composer icons evenly on Android (Round-2 B.6)", async () => {
+    window.AndroidBridge = { getStorage: () => null };
+    try {
+      document.body.innerHTML = `
+        <div id="composer">
+          <textarea id="chat-input" placeholder="Message DeepSeek"></textarea>
+          <input type="file" multiple />
+          <div id="prompt-actions">
+            <button id="deepthink" type="button">DeepThink</button>
+            <button id="websearch" type="button">Search</button>
+            <div id="send-cluster">
+              <button id="send" title="Send message" type="button"></button>
+            </div>
+          </div>
+        </div>
+      `;
+      const { scanInputArea } = await import("../../src/content/scanner.js");
+
+      scanInputArea();
+
+      const row = document.querySelector("#prompt-actions");
+      expect(row.getAttribute("data-bds-icon-row")).toBe("1");
+      expect(row.style.getPropertyValue("display")).toBe("flex");
+      expect(row.style.getPropertyPriority("display")).toBe("important");
+      expect(row.style.getPropertyValue("justify-content")).toBe("space-between");
+      expect(row.style.getPropertyPriority("justify-content")).toBe("important");
+      expect(row.style.getPropertyValue("gap")).toBe("8px");
+    } finally {
+      delete window.AndroidBridge;
+    }
+  });
+
+  it("leaves the composer layout alone on desktop (Round-2 B.6 is Android-only)", async () => {
+    document.body.innerHTML = `
+      <div id="composer">
+        <textarea id="chat-input" placeholder="Message DeepSeek"></textarea>
+        <input type="file" multiple />
+        <div id="prompt-actions">
+          <button id="deepthink" type="button">DeepThink</button>
+          <button id="websearch" type="button">Search</button>
+          <div id="send-cluster">
+            <button id="send" title="Send message" type="button"></button>
+          </div>
+        </div>
+      </div>
+    `;
+    const { scanInputArea } = await import("../../src/content/scanner.js");
+
+    scanInputArea();
+
+    const row = document.querySelector("#prompt-actions");
+    expect(row.getAttribute("data-bds-icon-row")).toBeNull();
+    expect(row.style.getPropertyValue("display")).toBe("");
+  });
+
+  it("never lays out a container that also holds the editor (Round-2 B.6 guard)", async () => {
+    window.AndroidBridge = { getStorage: () => null };
+    try {
+      // Degenerate composer: the editor lives inside the very node the scan
+      // would style — forcing flex/space-between there would break the input.
+      document.body.innerHTML = `
+        <div id="prompt-actions">
+          <textarea id="chat-input" placeholder="Message DeepSeek"></textarea>
+          <button id="deepthink" type="button">DeepThink</button>
+        </div>
+      `;
+      const { scanInputArea } = await import("../../src/content/scanner.js");
+
+      scanInputArea();
+
+      const row = document.querySelector("#prompt-actions");
+      expect(row.getAttribute("data-bds-icon-row")).toBeNull();
+    } finally {
+      delete window.AndroidBridge;
+    }
+  });
+
   it("never mounts a Deep Code icon into the composer action row", async () => {
     document.body.innerHTML = `
       <div id="composer">

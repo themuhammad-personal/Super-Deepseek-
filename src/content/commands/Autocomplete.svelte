@@ -50,7 +50,64 @@ import { devLog } from "../../lib/dev-log.js"
 
   $effect(refreshSnippetCommands)
 
-  function handleBlur() { isOpen = false }
+  // ── Tap-then-click race (Round-2 B.3) ─────────────────────────────────────
+  // On a touch screen the editor blurs as soon as the finger lands on a list
+  // item, which used to unmount the {#if isOpen} block (and the tapped button)
+  // *before* the click could be dispatched — the list looked fine but tapping
+  // a command did nothing. Two guards fix that:
+  //   · mousedown/pointerdown on the dropdown calls preventDefault(), so the
+  //     editor never loses focus in the first place;
+  //   · blur is deferred a moment and cancelled by any pointer activity inside
+  //     the dropdown, which also covers browsers that blur on touchstart.
+  const BLUR_GRACE_MS = 150
+  let blurTimer = 0
+  let pointerInsideDropdown = false
+
+  function cancelPendingBlur() {
+    if (!blurTimer) return
+    clearTimeout(blurTimer)
+    blurTimer = 0
+  }
+
+  function handleBlur() {
+    cancelPendingBlur()
+    blurTimer = setTimeout(() => {
+      blurTimer = 0
+      if (pointerInsideDropdown) return
+      devLog("Cmd", "AC closed (editor blurred)")
+      isOpen = false
+    }, BLUR_GRACE_MS)
+  }
+
+  /**
+   * Keeps focus on the editor while the user presses inside the list — the
+   * classic "prevent the mousedown default" trick. It does not cancel the
+   * click, only the focus transfer that would unmount the tapped button.
+   */
+  function handleDropdownMouseDown(e) {
+    cancelPendingBlur()
+    e.preventDefault()
+  }
+
+  /**
+   * Touch/pen presses: never preventDefault here (on some browsers that would
+   * swallow the synthesised click); the deferred blur above is enough.
+   */
+  function handleDropdownPointerStart() {
+    pointerInsideDropdown = true
+    cancelPendingBlur()
+  }
+
+  function handleDropdownPointerEnter() {
+    pointerInsideDropdown = true
+    cancelPendingBlur()
+  }
+
+  function handleDropdownPointerLeave() {
+    pointerInsideDropdown = false
+  }
+
+  $effect(() => () => cancelPendingBlur())
 
   $effect(() => {
     if (!editor) return
@@ -143,10 +200,18 @@ import { devLog } from "../../lib/dev-log.js"
 </script>
 
 {#if isOpen}
-  <div class="bds-cmd-dropdown" style={dropdownStyle}>
+  <div
+    class="bds-cmd-dropdown"
+    style={dropdownStyle}
+    onmousedown={handleDropdownMouseDown}
+    onpointerdown={handleDropdownPointerStart}
+    ontouchstart={handleDropdownPointerStart}
+    onmouseenter={handleDropdownPointerEnter}
+    onmouseleave={handleDropdownPointerLeave}
+  >
     <div class="bds-cmd-list">
       {#each filteredItems as item, i}
-        <button type="button" class="bds-cmd-item {i === selectedIndex ? 'bds-cmd-item--selected' : ''}" class:bds-cmd-item--builtin={item.type === "builtin"} class:bds-cmd-item--snippet={item.type === "snippet"} onclick={() => handleItemClick(i)} onmouseenter={() => { selectedIndex = i }}>
+        <button type="button" class="bds-cmd-item {i === selectedIndex ? 'bds-cmd-item--selected' : ''}" class:bds-cmd-item--builtin={item.type === "builtin"} class:bds-cmd-item--snippet={item.type === "snippet"} onmousedown={handleDropdownMouseDown} onpointerdown={handleDropdownPointerStart} ontouchstart={handleDropdownPointerStart} onclick={() => handleItemClick(i)} onmouseenter={() => { selectedIndex = i }}>
           {#if item.type === "builtin"}
             <span class="bds-cmd-icon">{@html item.cmd.icon}</span>
             <span class="bds-cmd-info"><span class="bds-cmd-name">/{item.cmd.id}{#if getArgsDisplay(item.cmd)}<span class="bds-cmd-args">{getArgsDisplay(item.cmd)}</span>{/if}</span><span class="bds-cmd-desc">{t(item.cmd.descKey)}</span></span>

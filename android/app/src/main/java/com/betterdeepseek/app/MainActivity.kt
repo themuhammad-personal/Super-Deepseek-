@@ -237,6 +237,12 @@ class MainActivity : ComponentActivity() {
     private var popupContainer: FrameLayout? = null
     private var popupWebView: WebView? = null
 
+    /**
+     * Round-2 B.7: keeps the WebView hidden until the content script signals
+     * that BDS is mounted (with a safety timeout so it can never stay blank).
+     */
+    private lateinit var revealGate: WebViewRevealGate
+
     private var pendingFileChooser: ValueCallback<Array<Uri>>? = null
     private val fileChooserLauncher: ActivityResultLauncher<Intent> =
             registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -395,6 +401,12 @@ class MainActivity : ComponentActivity() {
                     bridge.evaluateJs = { script -> evaluateJavascript(script, null) }
                     isVerticalScrollBarEnabled = true
                     setBackgroundColor(if (isPageDark) PAGE_BG_DARK else PAGE_BG_LIGHT)
+                    // Round-2 B.7: the WebView is painted as soon as the page
+                    // loads, so DeepSeek's own (unstyled, untranslated) UI used
+                    // to flash before BDS mounted. It stays hidden until the
+                    // content script reports that BDS is ready — or until the
+                    // gate's safety timeout fires.
+                    visibility = View.INVISIBLE
                 }
 
         applySystemLocaleCookie()
@@ -429,6 +441,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+
+        // Round-2 B.7: the content script calls this once BDS is mounted (and
+        // the native UI it hides is hidden); the reveal is idempotent, so a
+        // second call per page load is harmless.
+        revealGate = WebViewRevealGate(webView)
+        bridge.onUiReady = { revealGate.reveal("content-script") }
 
         setContentView(rootLayout)
         if (BuildConfig.DEBUG) {
@@ -564,8 +582,12 @@ class MainActivity : ComponentActivity() {
         updateProgressDialog?.dismiss()
         updateProgressDialog = null
         bridge.onThemeChanged = null
+        bridge.onUiReady = null
         bridge.evaluateJs = null
         bridge.onPickFiles = null
+        if (::revealGate.isInitialized) {
+            revealGate.cancel()
+        }
         webView.removeJavascriptInterface(BRIDGE_NAME)
         if (::cookieManager.isInitialized) {
             cookieManager.flush()
@@ -615,6 +637,16 @@ class MainActivity : ComponentActivity() {
                         return false
                     }
                     return openExternalUrl(url)
+                }
+
+                override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
+                    super.onPageStarted(view, url, favicon)
+                    if (url.isNullOrEmpty()) return
+                    if (url.startsWith("https://chat.deepseek.com")) {
+                        // Round-2 B.7: a new page = a new first paint. Hide again
+                        // and re-arm the safety net; onUiReady() reveals sooner.
+                        if (::revealGate.isInitialized) revealGate.reset()
+                    }
                 }
 
                 override fun onPageFinished(view: WebView, url: String?) {
@@ -1020,6 +1052,7 @@ class MainActivity : ComponentActivity() {
         private const val UPDATE_APK_NAME = "bds-update.apk"
 
         private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
+
 
         // Default WebView background colours used in the inset-padding area behind transparent
         // system bars. Approximates DeepSeek's own page backgrounds so the status/nav bar region

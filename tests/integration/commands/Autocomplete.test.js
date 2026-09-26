@@ -87,14 +87,64 @@ describe("Autocomplete", () => {
     cleanup();
   });
 
-  it("closes dropdown on blur", async () => {
+  it("closes dropdown on blur after the tap-then-click grace period", async () => {
     const { editor, target, cleanup } = await setup();
     type(editor, "/");
     await flushUi();
     expect(target.querySelector(".bds-cmd-dropdown")).toBeTruthy();
     editor.dispatchEvent(new Event("blur"));
+    // Round-2 B.3: blur is deferred so a tap inside the list can still land.
+    await new Promise((resolve) => setTimeout(resolve, 250));
     await flushUi();
     expect(target.querySelector(".bds-cmd-dropdown")).toBeFalsy();
+    cleanup();
+  });
+
+  it("keeps the list mounted through the real mousedown → blur → click order", async () => {
+    const { editor, target, cleanup } = await setup();
+    type(editor, "/");
+    await flushUi();
+
+    const helpItem = Array.from(target.querySelectorAll(".bds-cmd-item")).find((item) =>
+      item.textContent.includes("/help"),
+    );
+    expect(helpItem).toBeTruthy();
+
+    const helpEvents = [];
+    const onHelp = () => helpEvents.push("help");
+    window.addEventListener("bds:show-help", onHelp);
+
+    // Exactly what a phone does when the finger lands on a list item: the
+    // mousedown moves focus, the editor blurs, then the click is dispatched.
+    const downEvent = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+    helpItem.dispatchEvent(downEvent);
+    expect(downEvent.defaultPrevented).toBe(true); // focus stays on the editor
+    editor.dispatchEvent(new Event("blur"));
+    await flushUi();
+    // …so the tapped button is still in the DOM when the click arrives.
+    expect(target.querySelector(".bds-cmd-dropdown")).toBeTruthy();
+
+    helpItem.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flushUi();
+
+    expect(helpEvents).toEqual(["help"]);
+    expect(target.querySelector(".bds-cmd-dropdown")).toBeFalsy(); // selectCurrent() ran
+    window.removeEventListener("bds:show-help", onHelp);
+    cleanup();
+  });
+
+  it("cancels the pending blur when a pointer presses inside the list", async () => {
+    const { editor, target, cleanup } = await setup();
+    type(editor, "/");
+    await flushUi();
+
+    const item = target.querySelector(".bds-cmd-item");
+    editor.dispatchEvent(new Event("blur"));
+    item.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    await flushUi();
+
+    expect(target.querySelector(".bds-cmd-dropdown")).toBeTruthy();
     cleanup();
   });
 

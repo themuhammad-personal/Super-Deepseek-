@@ -23,6 +23,7 @@ import { setDevLogging } from "../lib/dev-log.js";
 import { loadStateFromStorage, bindStorageChangeListener } from "./storage.js";
 import { injectHookScript, setupBridgeEvents, pushConfigToPage } from "./bridge.js";
 import { mountUi } from "./ui/mount.js";
+import { signalUiReadyAfterPaint } from "../android/ui-ready.js";
 import { observeChatDom, scheduleScan, startUrlWatcher } from "./scanner.js";
 import { initSidebarMenuInjector } from "./ui/SidebarMenuInjector.js";
 import { initSidebarSearch } from "./ui/SidebarSearch.js";
@@ -87,6 +88,12 @@ async function init() {
   });
   startStatusMonitor();
   startThemeWatcher();
+
+  // Round-2 B.7: the native shell keeps the WebView hidden until this signal
+  // (it also has a safety timeout). Two frames after the first scan so the
+  // first visible paint already shows the BDS UI with the native elements the
+  // script hides already hidden.
+  signalUiReadyAfterPaint("after-first-scan");
 
   // Keep state.remoteConfig in sync when the RemoteConfigManager updates
   window.addEventListener(REMOTE_CONFIG_EVENT, () => {

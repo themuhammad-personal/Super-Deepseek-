@@ -24,6 +24,7 @@ import { injectShareDialogWarning } from "./dom/share-dialog-injector.js";
 import { setDeepResearchEnabled } from "./deep-research.js";
 import { loadDeepCodeState } from "./deep-code.js";
 import { tryExecuteRawInput } from "./commands/executor.js";
+import { isAndroidWebView } from "../lib/platform.js";
 import { checkPendingHandoff } from "./commands/context-handoff.js";
 import Autocomplete from "./commands/Autocomplete.svelte";
 import CommandsHelp from "./commands/CommandsHelp.svelte";
@@ -571,6 +572,24 @@ export function scanInputArea() {
     : (hasNativeActionRow ? firstNativeRowChild(deepResearchWrapper) : insertBeforeNode);
   const deepResearchAnchor = sendClusterAnchor;
 
+  // C.1 evidence: the locked order is only guaranteed while both anchors exist.
+  devLog(
+    "Composer",
+    "anchors",
+    JSON.stringify({
+      nativeActionRow: hasNativeActionRow,
+      plusAnchor: describeElement(plusAnchor),
+      deepResearchAnchor: describeElement(deepResearchAnchor),
+      wrapper: describeElement(deepResearchWrapper),
+      nativeUploadTriggerFound: Boolean(nativeButton),
+    }),
+  );
+
+  // B.6: the shared action-row wrapper (the real native prompt row when we can
+  // find it, otherwise the row the mounts live in) hosts every composer icon.
+  const iconRow = hasNativeActionRow && deepResearchWrapper ? deepResearchWrapper : wrapper;
+  applyComposerIconRowLayout(iconRow);
+
   const deepResearchMountPoint = ensureComposerMount(
     deepResearchWrapper,
     "bds-deep-research-mount",
@@ -597,6 +616,7 @@ export function scanInputArea() {
   // TODO(BDS-UI): re-check DeepCode placement once the drawer redesign ships.
 
   if (!fileInput || !wrapper) {
+    neutralizeIconRowInnerMargins(hasNativeActionRow ? deepResearchWrapper : wrapper);
     markComposerControlsMounted(deepResearchWrapper, wrapper);
     return;
   }
@@ -621,11 +641,15 @@ export function scanInputArea() {
     mountPoint.dataset.bdsMounted = "1";
   }
 
+  // B.6: these two are not composer icons, so they live in the composer
+  // container instead of the five-icon action row.
+  const composerContainer = findComposerContainerOutsideIconRow(iconRow, wrapper);
+
   const toggleMountPoint = ensureComposerMount(
-    wrapper,
+    composerContainer,
     "bds-expand-toggle-mount",
     ".bds-expand-toggle",
-    fileInput,
+    null,
   );
   if (!toggleMountPoint.dataset.bdsMounted) {
     mount(ExpandToggle, { target: toggleMountPoint });
@@ -633,15 +657,24 @@ export function scanInputArea() {
   }
 
   const ragMountPoint = ensureComposerMount(
-    wrapper,
+    composerContainer,
     "bds-rag-preview-mount",
     ".bds-rag-preview",
-    fileInput,
+    null,
   );
   if (!ragMountPoint.dataset.bdsMounted) {
     mount(RagPreview, { target: ragMountPoint });
     ragMountPoint.dataset.bdsMounted = "1";
   }
+
+  // B.6 (continued): the mounts now exist, so their inner margins can be
+  // neutralised for the evenly spaced icon row.
+  neutralizeIconRowInnerMargins(hasNativeActionRow ? deepResearchWrapper : wrapper);
+
+  // C.1 evidence: the locked order as it actually ended up. A language switch
+  // that moves an anchor shows up here as a changed list, which is what makes
+  // the on-device chrome://inspect capture decisive.
+  devLog("Composer", "order", describeComposerRow(iconRow));
 
   markComposerControlsMounted(wrapper);
 }
@@ -701,6 +734,40 @@ function markComposerControlsMounted(...wrappers) {
 }
 
 function findComposerControlsWrapper(fileInput) {
+  const resolved = resolveComposerControlsWrapper(fileInput);
+  // Round-2 C.1: the composer icon order breaks after switching DeepSeek's UI
+  // language, so every anchor decision is logged with the evidence needed to
+  // see *which* element was picked (and why) from chrome://inspect.
+  devLog(
+    "Composer",
+    "controls wrapper:",
+    describeElement(resolved),
+    "| file input:",
+    describeElement(fileInput),
+    "| fallback from parent:",
+    Boolean(fileInput?.parentElement),
+  );
+  return resolved;
+}
+
+/**
+ * Describes a DOM element for the composer dev log: tag, id, classes and the
+ * first few words of its text — enough to recognise DeepSeek's own nodes
+ * without attaching a debugger.
+ */
+function describeElement(element) {
+  if (!element) return "none";
+  const tag = String(element.tagName || "").toLowerCase();
+  const id = element.id ? `#${element.id}` : "";
+  const classes =
+    typeof element.className === "string" && element.className.trim()
+      ? `.${element.className.trim().split(/\s+/).slice(0, 3).join(".")}`
+      : "";
+  const text = normalizePromptControlText(element.textContent).slice(0, 24);
+  return `<${tag}${id}${classes}${text ? ` "${text}"` : ""}>`;
+}
+
+function resolveComposerControlsWrapper(fileInput) {
   if (fileInput?.parentElement) {
     return fileInput.parentElement;
   }
@@ -725,10 +792,17 @@ function findComposerControlsWrapper(fileInput) {
 function findDeepResearchControlsWrapper(fileInput, fallbackWrapper) {
   const actionRow = findNativePromptActionRow();
   if (actionRow) {
+    devLog("Composer", "deep-research wrapper = native action row", describeElement(actionRow));
     return actionRow;
   }
 
-  return fallbackWrapper || findComposerControlsWrapper(fileInput);
+  const fallback = fallbackWrapper || findComposerControlsWrapper(fileInput);
+  devLog(
+    "Composer",
+    "deep-research wrapper = fallback (no native action row found)",
+    describeElement(fallback),
+  );
+  return fallback;
 }
 
 function findNativePromptActionRow() {
@@ -752,7 +826,17 @@ function findNativePromptActionRow() {
       continue;
     }
 
+    // C.1 evidence: which control was recognised as Deep Think and which row it
+    // resolved to. A non-English UI changes the *label*, never this node — so a
+    // missing entry here is what points at a detection (not a layout) problem.
     const row = findControlsRowFor(control, editor);
+    devLog(
+      "Composer",
+      "deepthink control matched:",
+      describeElement(control),
+      "-> row:",
+      describeElement(row),
+    );
     if (row) {
       return row;
     }
@@ -970,6 +1054,107 @@ function findNativeFileInputTrigger(fileInput) {
     candidate.getAttribute("role") === "button";
 
   return isButtonLike ? candidate : null;
+}
+
+/**
+ * Round-2 B.6: the five composer icons must be spread evenly instead of
+ * clumping together, which is what happens when the native action row inherits
+ * DeepSeek's own gap/flex-end styling (and it shifts again when the UI language
+ * changes, because the native toggles change width).
+ *
+ * The rule is applied inline with `!important`, so a React re-render that
+ * rewrites the row's style attribute cannot win, and the marker attribute lets
+ * the E2E suite assert the layout without reading pixel values.
+ *
+ * Only rows that hold controls *and nothing else* are touched — the composer
+ * container that also hosts the editor is left alone.
+ */
+const ICON_ROW_ATTR = "data-bds-icon-row";
+
+/**
+ * The composer container that also holds the editor — the home of the BDS
+ * controls that are *not* composer icons. Keeping the (empty in their idle
+ * state) expand-toggle / RAG mounts out of the action row is what lets the row
+ * distribute exactly five icons with `space-between` (B.6).
+ */
+function findComposerContainerOutsideIconRow(iconRow, fallback) {
+  if (!iconRow) return fallback;
+  const editor = findComposerEditor();
+  if (editor) {
+    let node = iconRow.parentElement;
+    while (node && node !== document.body) {
+      if (node.contains(editor)) return node;
+      node = node.parentElement;
+    }
+  }
+  return iconRow.parentElement || fallback;
+}
+
+function applyComposerIconRowLayout(row) {
+  if (!row || !isAndroidWebView()) return;
+  if (row.querySelector?.('textarea, [role="textbox"], .ds-textarea, [contenteditable]')) {
+    return;
+  }
+
+  const style = row.style;
+  if (!style) return;
+
+  row.setAttribute(ICON_ROW_ATTR, "1");
+  const desired = [
+    ["display", "flex"],
+    ["align-items", "center"],
+    ["justify-content", "space-between"],
+    ["gap", "8px"],
+    ["width", "100%"],
+  ];
+  for (const [property, value] of desired) {
+    if (style.getPropertyValue(property) === value) continue;
+    style.setProperty(property, value, "important");
+  }
+
+}
+
+/**
+ * The BDS controls keep a little horizontal margin of their own (the upload
+ * wrapper reserves 6px on the right). Inside the space-between icon row that
+ * margin is what makes the *visible* gaps uneven even though the flex items are
+ * distributed correctly, so it is neutralised here — the row's own gap provides
+ * the spacing. Runs after the mounts exist (they are created by this scan).
+ */
+function neutralizeIconRowInnerMargins(row) {
+  if (!row) return;
+  const inner = row.querySelectorAll(
+    ".bds-attach-wrapper, .bds-deep-research-mount > *, .bds-deep-research-toggle, .bds-plus-btn",
+  );
+  for (const element of inner) {
+    if (!element.style) continue;
+    if (element.style.getPropertyValue("margin-left") !== "0px") {
+      element.style.setProperty("margin-left", "0", "important");
+    }
+    if (element.style.getPropertyValue("margin-right") !== "0px") {
+      element.style.setProperty("margin-right", "0", "important");
+    }
+  }
+}
+
+/**
+ * Labels the composer row's children for the C.1 dev log: BDS mounts by name,
+ * native controls by their (possibly translated) text plus id, everything else
+ * by tag. Order in this list *is* the on-screen order.
+ */
+function describeComposerRow(row) {
+  if (!row) return "none";
+  return Array.from(row.children)
+    .map((child) => {
+      if (child.classList?.contains("bds-attach-menu-mount")) return "plus(BDS)";
+      if (child.classList?.contains("bds-deep-research-mount")) return "deep-research(BDS)";
+      if (isBdsMountPoint(child)) return `${child.className.split(" ")[0]}(BDS)`;
+      const tag = String(child.tagName || "").toLowerCase();
+      if (tag === "input") return "input[type=file]";
+      const text = normalizePromptControlText(child.textContent).slice(0, 16);
+      return `${tag}${child.id ? `#${child.id}` : ""}${text ? `"${text}"` : ""}`;
+    })
+    .join(" → ");
 }
 
 function ensureComposerMount(wrapper, className, descendantSelector, beforeNode) {

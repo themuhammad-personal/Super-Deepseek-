@@ -240,6 +240,14 @@ internal class WebViewBridge(
     @Volatile var onThemeChanged: ((isDark: Boolean) -> Unit)? = null
 
     /**
+     * Set by MainActivity. Invoked from JS (BDS is mounted and the UI is ready)
+     * so the native layer can reveal the WebView — Round-2 B.7 keeps the
+     * WebView invisible until then, which is what removes the cold-launch flash
+     * of DeepSeek's unstyled native UI.
+     */
+    @Volatile var onUiReady: (() -> Unit)? = null
+
+    /**
      * Set by MainActivity to evaluate JS in the WebView. Results from native picker launchers
      * are delivered through CustomEvent instances in the page.
      */
@@ -273,6 +281,16 @@ internal class WebViewBridge(
     @JavascriptInterface
     fun reportTheme(isDark: Boolean) {
         onThemeChanged?.invoke(isDark)
+    }
+
+    /**
+     * Called by the content script once the BDS UI is mounted and the native
+     * elements it hides are hidden. Idempotent by contract: the native side
+     * only reveals the WebView on the first call per navigation.
+     */
+    @JavascriptInterface
+    fun uiReady() {
+        onUiReady?.invoke()
     }
 
     /** Returns the Android system locale for JS locale detection inside WebView. */

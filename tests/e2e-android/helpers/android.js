@@ -38,7 +38,8 @@ export async function reinjectAndroidContentBundle(page) {
  * in-memory mock of window.AndroidBridge that mirrors the @JavascriptInterface
  * contract from WebViewBridge.kt: synchronous get/set/remove against an
  * in-page Map, fetch() that returns JSON-encoded responses, downloadBlob()
- * that records calls into window.__bdsCapturedDownloads for assertions.
+ * that records calls into window.__bdsCapturedDownloads and uiReady() (the
+ * Round-2 B.7 reveal signal) that records into window.__bdsUiReadyCalls.
  */
 function buildAndroidBridgeBootstrap() {
   return `
@@ -46,7 +47,9 @@ function buildAndroidBridgeBootstrap() {
       if (window.AndroidBridge) return;
       const store = new Map();
       const downloads = [];
+      const uiReadyCalls = [];
       window.__bdsCapturedDownloads = downloads;
+      window.__bdsUiReadyCalls = uiReadyCalls;
       window.__bdsAndroidStore = store;
       window.AndroidBridge = {
         getStorage(key) {
@@ -60,6 +63,10 @@ function buildAndroidBridgeBootstrap() {
         removeStorage(key) {
           if (!key) return;
           store.delete(String(key));
+        },
+        uiReady() {
+          // Round-2 B.7: the native shell reveals the WebView on this signal.
+          uiReadyCalls.push(Date.now());
         },
         getAssetUrl(path) {
           return "https://bds-asset.local/bds/" + (path || "");

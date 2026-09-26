@@ -161,15 +161,44 @@
         left: 320px;
         right: 28px;
         bottom: 20px;
-        display: grid;
-        grid-template-columns: auto auto 1fr auto;
+        display: flex;
+        flex-direction: column;
         gap: 12px;
-        align-items: center;
+        align-items: stretch;
         padding: 16px;
         background: #ffffff;
         border: 1px solid #d1d5db;
         border-radius: 18px;
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+      }
+
+      /* DeepSeek keeps the native file input out of flow; mirror that so the
+         action row's flex layout only counts the five icons. */
+      #native-file-input {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .mock-prompt-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      /* The fixture is desktop-shaped; the Android simulator runs it in a
+         Pixel-class viewport, so the composer has to span the screen there. */
+      @media (max-width: 720px) {
+        .app-shell {
+          grid-template-columns: 1fr;
+        }
+
+        .composer-shell {
+          left: 12px;
+          right: 12px;
+        }
       }
 
       .native-attach-btn,
@@ -238,6 +267,7 @@
         border-bottom: 1px solid #e5e7eb;
       }
 
+      .mock-get-app-link,
       .mock-get-app-bar button {
         display: inline-flex;
         align-items: center;
@@ -248,9 +278,14 @@
         background: #f9fafb;
         cursor: pointer;
         font-size: 13px;
+        text-decoration: none;
+        color: inherit;
       }
 
       .mock-settings-trigger {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
         position: fixed;
         bottom: 16px;
         left: 16px;
@@ -276,6 +311,41 @@
     </style>
     <script>
       (() => {
+        /**
+         * Round-2 B.1: the fixture mimics chat.deepseek.com in more than one UI
+         * language ("?lang=bn"), so locale-proof detection can be exercised end
+         * to end. DeepSeek translates every native menu label; BDS must still
+         * find the account popover and the chat-row menu.
+         */
+        const LANG = (new URLSearchParams(window.location.search).get("lang") || "en").toLowerCase();
+        const TRANSLATIONS = {
+          en: {
+            settings: "Settings",
+            report: "Report issue",
+            download: "Download mobile App",
+            logout: "Log out",
+            rename: "Rename",
+            pin: "Pin",
+            share: "Share",
+            remove: "Delete",
+            getApp: "Get App",
+            userEmail: "user@example.com",
+          },
+          bn: {
+            settings: "সেটিংস",
+            report: "সমস্যা জানান",
+            download: "মোবাইল অ্যাপ ডাউনলোড করুন",
+            logout: "লগ আউট",
+            rename: "নাম পরিবর্তন করুন",
+            pin: "পিন করুন",
+            share: "শেয়ার করুন",
+            remove: "মুছে ফেলুন",
+            getApp: "অ্যাপটি নিন",
+            userEmail: "user@example.com",
+          },
+        };
+        const STRINGS = TRANSLATIONS[LANG] || TRANSLATIONS.en;
+
         function removeMenus() {
           document.querySelectorAll(".ds-dropdown-menu").forEach((menu) => menu.remove());
         }
@@ -371,7 +441,7 @@
           const menu = document.createElement("div");
           menu.className = "ds-dropdown-menu";
 
-          const labels = ["Rename", "Pin", "Share", "Delete"];
+          const labels = [STRINGS.rename, STRINGS.pin, STRINGS.share, STRINGS.remove];
           for (const label of labels) {
             const option = document.createElement("div");
             option.className = "ds-dropdown-menu-option";
@@ -419,13 +489,19 @@
 
           wireHistoryMenus();
 
+          // Round-2 D fixture: the promotion's label is translated, the store
+          // link is not — BDS must hide the bar in every language.
+          document
+            .querySelectorAll(".mock-get-app-label")
+            .forEach((node) => (node.textContent = STRINGS.getApp));
+
           // Settings menu: builds a real .ds-dropdown-menu on each open (same structure
           // as per-chat menus) so the hide-drawer-app-item MutationObserver fires.
           const SETTINGS_ITEMS = [
-            { text: "Settings", testid: "drawer-item-settings" },
-            { text: "Report issue", testid: "drawer-item-report" },
-            { text: "Download mobile App", testid: "drawer-item-download" },
-            { text: "Log out", testid: "drawer-item-logout" },
+            { text: STRINGS.settings, testid: "drawer-item-settings" },
+            { text: STRINGS.report, testid: "drawer-item-report" },
+            { text: STRINGS.download, testid: "drawer-item-download" },
+            { text: STRINGS.logout, testid: "drawer-item-logout" },
           ];
 
           function buildSettingsMenu() {
@@ -435,6 +511,18 @@
             const menu = document.createElement("div");
             menu.className = "ds-dropdown-menu";
             menu.dataset.testid = "settings-drawer";
+
+            // The signed-in user block: the language-independent anchor BDS uses
+            // to recognise this popover (Round-2 B.1, tier 2).
+            const userRow = document.createElement("div");
+            userRow.className = "ds-dropdown-menu-option";
+            userRow.dataset.testid = "drawer-item-user";
+            userRow.innerHTML = `
+              <img class="ds-avatar" src="https://cdn.deepseek.com/avatar/mock-user.png" alt="avatar" />
+              <div class="ds-dropdown-menu-option__label">${STRINGS.userEmail}</div>
+            `;
+            menu.appendChild(userRow);
+
             for (const { text, testid } of SETTINGS_ITEMS) {
               const opt = document.createElement("div");
               opt.className = "ds-dropdown-menu-option";
@@ -580,12 +668,21 @@
     </script>
   </head>
   <body>
-    <button id="mock-settings-trigger" class="mock-settings-trigger" data-testid="settings-trigger" title="Settings">&#8943;</button>
+    <!-- The sidebar account row: the only control that shows the user's avatar,
+         which is what makes it recognisable without any English text. -->
+    <button id="mock-settings-trigger" class="mock-settings-trigger" data-testid="settings-trigger" title="Settings" aria-haspopup="menu">
+      <img class="ds-avatar" src="https://cdn.deepseek.com/avatar/mock-user.png" alt="avatar" />
+      <span class="mock-account-name">User</span>
+    </button>
 
     <div class="mock-get-app-bar" data-testid="get-app-container">
+      <a class="mock-get-app-link" href="https://play.google.com/store/apps/details?id=com.deepseek.chat">
+        <span aria-hidden="true">&#128241;</span>
+        <span class="mock-get-app-label"></span>
+      </a>
       <button type="button">
         <span aria-hidden="true">&#128241;</span>
-        <span>Get App</span>
+        <span class="mock-get-app-label"></span>
       </button>
     </div>
     <div class="app-shell">
@@ -627,13 +724,19 @@
       </main>
     </div>
 
+    <!-- Round-2 B.6 fixture: the same shape DeepSeek uses — the editor sits in
+         the composer, the icons sit in a separate action row. -->
     <section class="composer-shell">
-      <div class="native-attach-btn" role="button" tabindex="0">Native Upload</div>
-      <input id="native-file-input" type="file" multiple />
       <div class="ds-textarea">
         <textarea id="chat-input" placeholder="Message DeepSeek"></textarea>
       </div>
-      <button id="send-button" title="Send message" type="button">Send</button>
+      <div id="prompt-actions" class="mock-prompt-actions">
+        <div class="native-attach-btn" role="button" tabindex="0">Native Upload</div>
+        <input id="native-file-input" type="file" multiple />
+        <button id="deepthink" type="button" aria-label="DeepThink">DeepThink</button>
+        <button id="websearch" type="button" aria-label="Search">Search</button>
+        <button id="send-button" title="Send message" type="button">Send</button>
+      </div>
     </section>
   </body>
 </html>

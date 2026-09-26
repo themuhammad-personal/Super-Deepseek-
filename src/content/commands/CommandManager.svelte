@@ -4,7 +4,11 @@
   import { STORAGE_KEYS } from "../../lib/constants.js"
   import { t } from "../../lib/i18n.svelte.js"
 
-  let { onClose } = $props()
+  // Round-2 B.4: the prop is spelled like every other close callback in the
+  // project (`onclose`, matching Drawer/DeepCodeModal/AddDirectoryModal).
+  // Svelte 5 props are case-sensitive, so the old `onClose` never matched the
+  // `onclose` Drawer passes — the × button called undefined and did nothing.
+  let { onclose = null } = $props()
 
   let newCommand = $state("")
   let selectedSnippetId = $state("")
@@ -60,7 +64,7 @@
 <div class="bds-cmd-manager">
   <div class="bds-cmd-manager-header">
     <h3>{t("commands.commandShortcuts")}</h3>
-    <button type="button" class="bds-cmd-manager-close" onclick={onClose}>&times;</button>
+    <button type="button" class="bds-cmd-manager-close" onclick={() => onclose?.()}>&times;</button>
   </div>
   <div class="bds-cmd-manager-add">
     <input
