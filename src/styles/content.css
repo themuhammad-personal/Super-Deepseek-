@@ -5073,3 +5073,11 @@ tr:hover .bds-row-hide-btn:hover {
   line-height: 1.4;
   color: var(--bds-text-secondary, #6b6b6b);
 }
+/* ── Native-menu hygiene (Round-2 B.1/B.2) ──────────────────────────────────
+ * DeepSeek's account popover is localised, so BDS cannot recognise the extra
+ * entries ("Report issue", "Download mobile App", …) by their translated text.
+ * SidebarMenuInjector marks them positionally instead (see
+ * HIDDEN_ENTRY_ATTR); this rule is what actually removes them from layout. */
+[data-bds-hidden-entry] {
+  display: none !important;
+}

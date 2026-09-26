@@ -53,6 +53,70 @@ function buildDropdownMenuInto(parent) {
   return menu;
 }
 
+/**
+ * Round-2 B.1/B.2 fixture: DeepSeek's account popover with *translated* labels
+ * and the signed-in user block (avatar + e-mail) that makes it recognisable
+ * without English text.
+ */
+function buildLocalisedAccountMenu({
+  official = "অফিসিয়াল সেটিংস",
+  report = "সমস্যা জানান",
+  download = "মোবাইল অ্যাপ ডাউনলোড করুন",
+  logout = "লগ আউট",
+  email = "user@example.com",
+  extraEntries = [report, download],
+  withAvatar = true,
+} = {}) {
+  const root = document.createElement("div");
+  root.className = "mock-settings-menu";
+  const menu = document.createElement("div");
+  menu.className = "ds-dropdown-menu";
+
+  if (withAvatar) {
+    const header = document.createElement("div");
+    header.className = "ds-dropdown-menu-option";
+    header.innerHTML = `
+      <img class="ds-avatar" src="https://cdn.deepseek.com/avatar/u1.png" alt="avatar" />
+      <div class="ds-dropdown-menu-option__label">${email}</div>
+    `;
+    menu.appendChild(header);
+  }
+
+  const texts = [official, ...extraEntries, logout];
+  for (const text of texts) {
+    const opt = document.createElement("div");
+    opt.className = "ds-dropdown-menu-option";
+    opt.innerHTML = `
+      <div class="ds-dropdown-menu-option__icon"></div>
+      <div class="ds-dropdown-menu-option__label">${text}</div>
+    `;
+    menu.appendChild(opt);
+  }
+
+  root.appendChild(menu);
+  document.body.appendChild(root);
+  return { root, menu };
+}
+
+/** The sidebar account row: the only button that shows the user's avatar. */
+function buildAccountTrigger() {
+  const button = document.createElement("button");
+  button.className = "_a1b2c3";
+  button.setAttribute("aria-haspopup", "menu");
+  button.innerHTML = `
+    <img class="ds-avatar" src="https://cdn.deepseek.com/avatar/u1.png" alt="avatar" />
+    <span>User Name</span>
+  `;
+  document.body.appendChild(button);
+  return button;
+}
+
+function visibleLabels(menu) {
+  return Array.from(menu.querySelectorAll(".ds-dropdown-menu-option"))
+    .filter((row) => !row.hasAttribute("data-bds-hidden-entry"))
+    .map((row) => row.querySelector(".ds-dropdown-menu-option__label")?.textContent.trim());
+}
+
 function buildSettingsDrawerMenu(labelText) {
   const menu = document.createElement("div");
   menu.className = "ds-dropdown-menu";
@@ -246,15 +310,24 @@ describe("SidebarMenuInjector", () => {
         o.querySelector(".ds-dropdown-menu-option__label")?.textContent.trim()
       );
 
-      const settingsIdx = labels.indexOf("Settings");
+      const settingsIdx = labels.indexOf("Official Settings");
       const advancedIdx = labels.indexOf("Advanced Settings");
       const pluginsIdx = labels.indexOf("Plugins");
       expect(pluginsIdx).toBe(0);
       expect(advancedIdx).toBe(1);
+      // Round-2 B.2: the native row is relabelled so it cannot be confused with
+      // the BDS screens.
       expect(settingsIdx).toBe(2);
-      // Official Settings and Log out stay native and untouched.
-      expect(labels).toContain("Settings");
+      expect(labels).not.toContain("Settings");
       expect(labels).toContain("Log out");
+      // Round-2 B.1: the extra native entries are hidden positionally, leaving
+      // exactly Plugins / Advanced Settings / Official Settings / Log out.
+      expect(visibleLabels(menu)).toEqual([
+        "Plugins",
+        "Advanced Settings",
+        "Official Settings",
+        "Log out",
+      ]);
     });
 
     it("no longer injects Get BDS App or What's New (relocated to the drawer footer)", async () => {
@@ -344,6 +417,147 @@ describe("SidebarMenuInjector", () => {
       expect(exporterMocks.exportSession).not.toHaveBeenCalled();
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("[BDS]"));
       warnSpy.mockRestore();
+    });
+  });
+  describe("locale-proof detection (Round-2 B.1/B.2)", () => {
+    const LOCALES = [
+      {
+        name: "Bengali",
+        labels: {
+          official: "অফিসিয়াল সেটিংস",
+          report: "সমস্যা জানান",
+          download: "মোবাইল অ্যাপ ডাউনলোড করুন",
+          logout: "লগ আউট",
+        },
+      },
+      {
+        name: "Japanese",
+        labels: {
+          official: "公式設定",
+          report: "問題を報告",
+          download: "モバイルアプリをダウンロード",
+          logout: "ログアウト",
+        },
+      },
+    ];
+
+    for (const locale of LOCALES) {
+      it(`recognises the ${locale.name} account popover from its structure`, async () => {
+        const { menu } = buildLocalisedAccountMenu(locale.labels);
+        const mod0 = await import("../../../src/content/ui/SidebarMenuInjector.js");
+
+        await vi.waitFor(() => expect(menu.querySelector(".bds-plugins-option")).not.toBeNull());
+
+        const labels = visibleLabels(menu);
+        // The signed-in user block stays first (kept, never relabelled), then
+        // exactly Plugins / Advanced Settings / Official Settings / Log out.
+        // The official-settings label is BDS's own translation (the app locale
+        // is English in tests) — the *native* Bengali/Japanese label it
+        // replaced is what proves detection worked.
+        expect(labels).toEqual([
+          "user@example.com",
+          "Plugins",
+          "Advanced Settings",
+          "Official Settings",
+          locale.labels.logout,
+        ]);
+        expect(menu.textContent).not.toContain(locale.labels.official);
+        // The user block is neither relabelled nor hidden.
+        expect(menu.querySelector(".ds-avatar")).not.toBeNull();
+        expect(menu.textContent).toContain("user@example.com");
+        // No chat entry leaked in.
+        expect(menu.querySelector(".bds-tags-option")).toBeNull();
+        expect(menu.querySelector(".bds-export-option")).toBeNull();
+      });
+
+      it(`recognises the ${locale.name} account popover from the tapped row`, async () => {
+        const trigger = buildAccountTrigger();
+        trigger.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+
+        const { menu } = buildLocalisedAccountMenu({ ...locale.labels, withAvatar: false });
+        await vi.waitFor(() => expect(menu.querySelector(".bds-plugins-option")).not.toBeNull());
+
+        expect(visibleLabels(menu)).toContain("Official Settings");
+      });
+
+      it(`keeps chat menus chat-only in ${locale.name}`, async () => {
+        const container = document.createElement("div");
+        const link = document.createElement("a");
+        link.href = "https://chat.deepseek.com/chat/s/localised";
+        const btn = document.createElement("button");
+        btn.textContent = "...";
+        link.appendChild(btn);
+        container.appendChild(link);
+        document.body.appendChild(container);
+
+        btn.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+
+        const menu = document.createElement("div");
+        menu.className = "ds-dropdown-menu";
+        for (const text of ["নাম পরিবর্তন", "মুছে ফেলুন"]) {
+          const opt = document.createElement("div");
+          opt.className = "ds-dropdown-menu-option";
+          opt.innerHTML = `<div class="ds-dropdown-menu-option__label">${text}</div>`;
+          menu.appendChild(opt);
+        }
+        document.body.appendChild(menu);
+
+        await vi.waitFor(() => expect(menu.querySelector(".bds-export-option")).not.toBeNull());
+
+        // Tags / Export land before the destructive (last) row and the account
+        // entries stay out.
+        const labelsInMenu = Array.from(menu.querySelectorAll(".ds-dropdown-menu-option")).map(
+          (row) => row.querySelector(".ds-dropdown-menu-option__label")?.textContent.trim(),
+        );
+        expect(labelsInMenu).toEqual([
+          "নাম পরিবর্তন",
+          "Tags (BDS)",
+          "Export Chat (BDS)",
+          "মুছে ফেলুন",
+        ]);
+        expect(menu.querySelector(".bds-plugins-option")).toBeNull();
+        expect(menu.querySelector(".bds-advanced-settings-option")).toBeNull();
+      });
+    }
+
+    it("re-checked every scan: React re-render re-applies the Official Settings label", async () => {
+      const { menu } = buildLocalisedAccountMenu();
+      await vi.waitFor(() => expect(menu.querySelector(".bds-plugins-option")).not.toBeNull());
+
+      // Simulate React re-rendering the popover: restore one native label and
+      // ask for another scan via the document click backup path.
+      const nativeRow = menu.querySelector(
+        "[data-bds-official-settings]",
+      );
+      const labelNode = nativeRow.querySelector(".ds-dropdown-menu-option__label");
+      labelNode.textContent = "সেটিংস";
+
+      document.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      expect(labelNode.textContent).toBe("Official Settings");
+      expect(nativeRow.hasAttribute("data-bds-official-settings")).toBe(true);
+    });
+
+    it("classifies triggers without depending on language", async () => {
+      const mod = await import("../../../src/content/ui/SidebarMenuInjector.js");
+      const { classifyMenuTrigger } = mod;
+
+      const accountTrigger = buildAccountTrigger();
+      expect(classifyMenuTrigger(accountTrigger)).toBe("account");
+
+      const row = document.createElement("div");
+      const link = document.createElement("a");
+      link.href = "https://chat.deepseek.com/chat/s/xyz";
+      const threeDot = document.createElement("button");
+      row.append(link, threeDot);
+      document.body.appendChild(row);
+      expect(classifyMenuTrigger(threeDot)).toBe("chat");
+
+      const unrelated = document.createElement("div");
+      unrelated.textContent = "no hints";
+      document.body.appendChild(unrelated);
+      expect(classifyMenuTrigger(unrelated)).toBeNull();
     });
   });
 });
