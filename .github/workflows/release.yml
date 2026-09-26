@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - main
+      # TEMPORARY (remove before merging to main): lets a release APK be built
+      # from the working branch, because `workflow_dispatch` cannot be called
+      # with the CI token available to the agent (HTTP 403). Runs on this
+      # branch only build + verify + sign the APK and upload it as a workflow
+      # artifact; the GitHub release steps stay gated on main / v* tags.
+      - "arena/**"
     tags:
       - "v*"
   # Manual trigger (e.g. `gh workflow run release.yml --ref <branch>`) so a
