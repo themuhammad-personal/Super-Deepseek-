@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.BetterDeepSeek" parent="Theme.Material3.DayNight" />
+
+    <!-- Must stay identical to the values/ variant: this file overrides it in
+         night mode, and MainActivity draws the WebView edge to edge, so a
+         missing transparent bar colour would show the theme's default bar
+         background behind the status/nav bars. -->
+    <style name="Theme.BetterDeepSeek.NoActionBar" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

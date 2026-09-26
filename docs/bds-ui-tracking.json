@@ -1,0 +1,259 @@
+{
+  "task": "Better DeepSeek UI Restructure (master-coding-prompt-final)",
+  "prompt_file": "docs/master-coding-prompt-final.md",
+  "branch": "arena/01a0d81f-super-deepseek",
+  "base_commit": "f4a8348931f2ad5e595fe701ffe0ebbe3282e415",
+  "status": "complete",
+  "commits": [
+    {
+      "sha": "bfa2942",
+      "title": "BDS-UI: restructure composer, nav and settings (master prompt F/E)",
+      "scope": "24 files changed, +1698/-697"
+    },
+    {
+      "sha": "3dd3e67",
+      "title": "test(e2e): drive the reworked Android suite through the new entry points",
+      "scope": "android.spec.js, helpers/android.js, new SidebarSearch suite, AdvancedSettings suite rename"
+    },
+    {
+      "sha": "99fdf9a",
+      "title": "docs: master prompt, tracking JSON, progress update, handoff + a11y label fix",
+      "scope": "docs/*.md, docs/bds-ui-tracking.json, PluginsSettings label associations"
+    },
+    {
+      "sha": "6b3ff74",
+      "title": "ci(release): temporary arena/** push trigger to build the release APK",
+      "scope": ".github/workflows/release.yml (remove before merging to main)"
+    }
+  ],
+  "requirements": [
+    {
+      "id": "E.1",
+      "requirement": "Composer = exactly 5 icons L→R: Plus, Deep Think, Web Search, Deep Research, Send; no Project icon; DeepCode skip intent preserved",
+      "status": "done",
+      "files": [
+        "src/content/scanner.js",
+        "src/content/ui/AttachMenu.svelte",
+        "src/content/ui/Drawer.svelte"
+      ],
+      "evidence": [
+        "tests/integration/scanner.test.js asserts ['plus','deep-think','web-search','deep-research','send'] within the composer action row",
+        "tests/integration/scanner.test.js: never mounts a Deep Code icon into the composer action row",
+        "tests/e2e-android/android.spec.js: composer hosts the upload trigger only, with no project or DeepCode icon",
+        "Drawer.svelte gates #bds-section-deepcode on BDS_TARGET !== 'android' (tests/integration/ui/Drawer.test.js)"
+      ]
+    },
+    {
+      "id": "F.1",
+      "requirement": "Plus opens the redesigned 2×3 upload drawer (File | Index folder / GitHub repo | Web page / Command | Project); each card reuses the existing handler; Project card replaces the standalone icon",
+      "status": "done",
+      "files": [
+        "src/content/ui/AttachMenu.svelte",
+        "src/content/commands/insert-command.js",
+        "src/locales/*.json"
+      ],
+      "evidence": [
+        "tests/integration/ui/AttachMenu.test.js: locked grid order ['File','Index folder','GitHub repo','Web page','Command','Project']",
+        "AttachMenu.test.js: Project card opens the existing panel; Command card writes '/<id> ' into #chat-input",
+        "tests/e2e-android/android.spec.js: folder / GitHub / File cards drive the native picker bridge"
+      ]
+    },
+    {
+      "id": "F.2",
+      "requirement": "Command lives only in the upload drawer; no standalone Commands section in default settings; registry/parser/executor/autocomplete/persistence untouched",
+      "status": "done",
+      "files": [
+        "src/content/ui/Drawer.svelte",
+        "src/content/commands/insert-command.js"
+      ],
+      "evidence": [
+        "tests/integration/ui/Drawer.test.js: command list collapsed by default, absent from both settings systems, opens via openDrawerSection('commands')",
+        "Drawer.test.js: clicking a command writes '/<id> ' through the shared insertCommandIntoChat helper"
+      ]
+    },
+    {
+      "id": "F.3",
+      "requirement": "Long custom sidebar search bar removed from the default UI, native search icon untouched",
+      "status": "done",
+      "files": [
+        "src/content/ui/SidebarSearch.js"
+      ],
+      "evidence": [
+        "ENABLE_LONG_SIDEBAR_SEARCH = false gates both entry points",
+        "tests/integration/ui/SidebarSearch.test.js (3 tests): init and rescans mount nothing"
+      ]
+    },
+    {
+      "id": "F.4",
+      "requirement": "Top #bds-toggle trigger removed; settings reachable from the sidebar account menu; Drawer/Settings functionality preserved",
+      "status": "done",
+      "files": [
+        "src/content/ui/App.svelte",
+        "src/content/ui/mount.js",
+        "src/styles/content.css"
+      ],
+      "evidence": [
+        "tests/integration/ui/App.test.js: no floating #bds-toggle; openDrawerSection('plugins'|'advanced') opens #bds-drawer",
+        "tests/e2e-android/android.spec.js: #bds-toggle count 0; drawer opened from the account popover"
+      ]
+    },
+    {
+      "id": "F.5",
+      "requirement": "Account popover = Plugins / Advanced Settings / Official Settings / Log out; no Tags / Export / Get BDS App / What's New; Tags+Export stay in the chat menu; Get BDS App + What's New move to the drawer footer; native Help & Feedback untouched",
+      "status": "done",
+      "files": [
+        "src/content/ui/SidebarMenuInjector.js",
+        "src/content/ui/Drawer.svelte"
+      ],
+      "evidence": [
+        "tests/integration/ui/SidebarMenuInjector.test.js: account menu gets exactly Plugins + Advanced Settings before the native rows; chat menu keeps Tags + Export; no cross-injection either way",
+        "tests/e2e-android/android.spec.js: real popover shows Plugins + Advanced Settings, native Download mobile App / Log out intact, no .bds-get-app-option / .bds-whats-new-option",
+        "tests/integration/ui/Drawer.test.js: #bds-get-app-entry and #bds-whats-new-entry live in the drawer footer next to the GitHub link"
+      ]
+    },
+    {
+      "id": "F.6",
+      "requirement": "Settings physically split: AdvancedSettings (all non-MCP) and PluginsSettings (MCP) as separate components with separate state/save/guards; no literal 'General Settings'; subMcp labelKey = mcp.sectionTitle",
+      "status": "done",
+      "files": [
+        "src/content/ui/settings/AdvancedSettings.svelte",
+        "src/content/ui/settings/PluginsSettings.svelte",
+        "src/content/ui/SettingsPanel.svelte (deleted)",
+        "src/styles/settings.css"
+      ],
+      "evidence": [
+        "tests/integration/ui/AdvancedSettings.test.js: own shell #bds-settings-advanced, no MCP UI, no accordion wrapper",
+        "tests/integration/ui/PluginsSettings.test.js: own shell #bds-settings-plugins, own save button and unsaved-changes guard, MCP CRUD only",
+        "tests/integration/ui/Drawer.test.js: both systems mounted side by side, neither owns the other's save button"
+      ]
+    },
+    {
+      "id": "F.7",
+      "requirement": "Premium mobile-first dark redesign of the split settings with no functional loss",
+      "status": "done",
+      "files": [
+        "src/styles/settings.css",
+        "src/content/ui/settings/*.svelte"
+      ],
+      "evidence": [
+        "Every legacy settings test still passes: tests/integration/ui/AdvancedSettings.test.js (13 tests)",
+        "Visual check on the Pixel-5-viewport simulator run (screenshots/traces available from CI artifact playwright-report-android)"
+      ]
+    },
+    {
+      "id": "F.8",
+      "requirement": "Android full-screen: fix the top banner/inset strip, keep bottom/IME handling, preserve OAuth/session/cookie/package/signing, update EdgeToEdgeTest.kt",
+      "status": "done",
+      "files": [
+        "android/app/src/main/java/com/betterdeepseek/app/MainActivity.kt",
+        "android/app/src/androidTest/java/com/betterdeepseek/app/EdgeToEdgeTest.kt",
+        "android/app/src/test/java/com/betterdeepseek/app/KeyboardInsetTest.kt"
+      ],
+      "evidence": [
+        "applyRootWindowInsets pads left/right, top = 0, bottom = max(systemBars.bottom, ime.bottom), translationY = 0, returns CONSUMED",
+        "CI run 36167256744: 'Run Kotlin unit tests' and 'Build Android APK (debug)' both succeeded"
+      ]
+    },
+    {
+      "id": "J",
+      "requirement": "Tests updated/added for the restructure",
+      "status": "done",
+      "files": [
+        "tests/integration/ui/AttachMenu.test.js",
+        "tests/integration/ui/App.test.js",
+        "tests/integration/ui/Drawer.test.js (new)",
+        "tests/integration/ui/PluginsSettings.test.js (new)",
+        "tests/integration/ui/SidebarSearch.test.js (new)",
+        "tests/integration/ui/AdvancedSettings.test.js (renamed from SettingsPanel.test.js)",
+        "tests/integration/ui/SidebarMenuInjector.test.js",
+        "tests/integration/scanner.test.js",
+        "tests/e2e-android/android.spec.js",
+        "tests/e2e-android/helpers/android.js"
+      ],
+      "evidence": [
+        "1529 vitest tests pass; 23/23 Android simulator tests pass locally and in CI"
+      ]
+    }
+  ],
+  "verification": {
+    "check_locales": "PASS (all 5 locales key-compatible)",
+    "build_android": "PASS - 911 + 10 + 11 modules, 9 assets staged",
+    "test_unit": "PASS - 103 files / 1529 tests (local run /tmp/unit2.log)",
+    "test_e2e_android_local": "PASS - 23/23 (5 consecutive full runs) using a sandboxed Chromium runner",
+    "ci_run": {
+      "id": 36167256744,
+      "conclusion": "success",
+      "jobs": [
+        "Unit tests: success",
+        "Android: success (build:android, staged assets, e2e suite, gradle test, assembleDebug, artifact uploads)"
+      ]
+    },
+    "not_runnable_local": [
+      "npm run android:assemble:debug - no JDK/Android SDK in the sandbox (network allowlist blocks SDK/apt installs); executed in CI instead",
+      "npm run android:test - same",
+      "npm run test:ci - wraps the two above"
+    ],
+    "not_runnable_anywhere_from_this_session": [
+      "GitHub release workflow dispatch: gh workflow run -> HTTP 403 (no admin scope on the integration token)"
+    ],
+    "release_apk_build": {
+      "run_id": 36208831285,
+      "run_number": 2,
+      "workflow": "Build and Release",
+      "commit": "6b3ff745a38849325f24655058a7774f812124e4",
+      "conclusion": "success",
+      "artifact": "better-deepseek-android-signed-apk",
+      "artifact_size_bytes": 5533785,
+      "file_name": "better-deepseek-android-v0.1.14-signed.apk",
+      "signed": false,
+      "signing_note": "Annotation: 'android/ci-release.jks is missing (BDS_KEYSTORE secret not configured) - the release APK is unsigned; skipping signature verification.' An unsigned APK cannot be installed on a device; the CI job's android-apk-debug artifact (6,887,890 bytes) is debug-key signed and installable.",
+      "trigger_note": "gh workflow run release.yml -> HTTP 403 (integration token), so the build used the same temporary arena/** push trigger as the Task-1 release build.",
+      "download_note": "Artifacts are served from *.blob.core.windows.net, which is unreachable from this sandbox; download from the Actions UI.",
+      "decision": "Owner decision (2026-09-26): keep the release APK as-is (unsigned) and install the CI debug APK instead. No keystore secrets were added and no debug-key signing fallback was introduced into the release workflow."
+    },
+    "ci_run_after_release_build": {
+      "run_id": 36208833048,
+      "commit": "6b3ff745a38849325f24655058a7774f812124e4",
+      "conclusion": "success",
+      "artifacts": {
+        "android-apk-debug": 6887890,
+        "android-unit-test-results": 42948,
+        "coverage": 2645903,
+        "android-unit-test-report": 56200,
+        "playwright-report-android": 244763
+      }
+    },
+    "installable_apk": {
+      "source": "CI workflow 'CI' (Android job)",
+      "run_id": 36209081618,
+      "commit": "aed440d",
+      "artifact": "android-apk-debug",
+      "artifact_size_bytes": 6887898,
+      "path_inside_artifact": "app-debug.apk",
+      "signing": "debug keystore (installable)",
+      "download_url": "https://github.com/themuhammad-personal/Super-Deepseek-/actions/runs/36209081618"
+    }
+  },
+  "open_items": [
+    {
+      "item": "Release workflow build for this branch",
+      "detail": "Built: Build and Release run 36208831285 (run #2) succeeded on 6b3ff74 and uploaded better-deepseek-android-signed-apk (5,533,785 bytes / better-deepseek-android-v0.1.14-signed.apk). It is UNSIGNED because the BDS_KEYSTORE/BDS_KEYSTORE_PASSWORD/BDS_KEY_ALIAS/BDS_KEY_PASSWORD secrets are not configured; add them in repo Settings -> Secrets and variables -> Actions and re-run to get an installable signed APK. The temporary arena/** push trigger is still in place and must be removed before merging to main. Owner decision: keep the unsigned release build and the temporary arena/** trigger for now; use the CI debug APK (android-apk-debug, run 36209081618) for installs.",
+      "needs_confirmation": true
+    },
+    {
+      "item": "Reference mockups",
+      "detail": "63672.png / 63673.png / 63674.jpg / 63675.jpg / 63676.jpg were never attached to the session, so the redesign followed the locked text requirements plus the two annotated phone screenshots.",
+      "needs_confirmation": true
+    },
+    {
+      "item": "Device verification",
+      "detail": "Android behaviour was verified through the WebView simulator suite (Chromium + mock bridge) and the Kotlin/CI builds; no physical device or emulator run was possible in the sandbox.",
+      "needs_confirmation": false
+    }
+  ],
+  "known_limitations": [
+    "The long BDS sidebar search stays in the source but is disabled by default (ENABLE_LONG_SIDEBAR_SEARCH = false) - a deliberate F.3 choice, reversible with a one-line change.",
+    "Scanning/fetching unsupported file formats is unchanged from the shipped extension; no new capabilities were introduced.",
+    "Pre-existing Svelte a11y warnings elsewhere in the codebase were left as-is; the three new warnings introduced by PluginsSettings were fixed."
+  ]
+}
