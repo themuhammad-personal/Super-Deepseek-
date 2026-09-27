@@ -577,13 +577,18 @@ class MainActivity : ComponentActivity() {
                     super.onPageStarted(view, url, favicon)
                     // The bridge (storage, files, MCP keys, the Linux sandbox) only
                     // serves the DeepSeek page — never a foreign page this WebView
-                    // may be redirected to.
-                    bridge.trustedPage = isTrustedBridgeUrl(url)
+                    // may be redirected to. Iframe navigations (OAuth, hCaptcha)
+                    // also land here on some WebView versions; only the main
+                    // frame's URL decides (MainFrameTracker).
+                    bridge.trustedPage = MainFrameTracker.trustedForPage(url, view.url)
                 }
                 override fun onPageFinished(view: WebView, url: String?) {
                     super.onPageFinished(view, url)
                     Log.d("SuperDeepSeek", "Official WebView loaded: $url")
-                    if (url?.contains("chat.deepseek.com") == true) {
+                    // Main frame only, host-checked (never `contains`): an iframe
+                    // finish or a foreign URL carrying "chat.deepseek.com" in its
+                    // query string must not receive the engine bundle.
+                    if (MainFrameTracker.shouldInjectEngine(url, view.url)) {
                         // The engine bundle (once per document, see injectBdsScripts).
                         injectBdsScripts(view)
                         // The launch screen stays until the enhanced page is really
