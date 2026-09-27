@@ -1,0 +1,262 @@
+name: Build and Release Android APK
+
+on:
+  push:
+    branches:
+      - main
+      - v3-real-exact-ui
+      - arena/01a0cebd-deepseek
+      - arena/01a0dc4d-deepseek
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish to GitHub Releases (leave OFF for branch test builds)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    name: Build & Verify APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle*
+            android/**/gradle-wrapper.properties
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools platforms;android-34 build-tools;34.0.0
+      - name: Write Android local.properties
+        run: printf 'sdk.dir=%s\n' "$ANDROID_HOME" > android/local.properties
+      - name: Install NPM Dependencies
+        run: npm ci
+      - name: Typecheck & Unit Tests
+        run: |
+          npm run typecheck
+          npm run test:app
+          npm run test:engine
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+      - name: Stage Super DeepSeek engine assets
+        run: |
+          mkdir -p android/app/src/main/assets
+          rm -rf android/app/src/main/assets/bds
+          cp -r android/app/src/main/bds-assets/bds android/app/src/main/assets/bds
+          echo "=== Engine assets staged ==="
+          ls -lh android/app/src/main/assets/bds/
+      - name: Fetch Linux sandbox runtime (proot, libtalloc, Alpine manifest)
+        # Termux proot/libtalloc .debs (SHA-256 checked, mirror fallback) become
+        # jniLibs/<abi>/lib*.so; the Alpine minirootfs is downloaded by the app on
+        # first use. A failure here only disables the sandbox, so it must not
+        # block the build — but it is surfaced loudly.
+        continue-on-error: true
+        run: |
+          if ! python3 scripts/fetch_sandbox_deps.py; then
+            echo "::warning::Linux sandbox runtime could not be fetched; this build ships without the sandbox."
+            exit 1
+          fi
+          find android/app/src/main/jniLibs -type f -exec ls -l {} +
+      - name: Make Gradle Wrapper Executable
+        working-directory: android
+        run: chmod +x ./gradlew
+      - name: Run Android Unit Tests
+        id: unittests
+        working-directory: android
+        run: |
+          set -o pipefail
+          if ! ./gradlew --no-daemon testDebugUnitTest 2>&1 | tee /tmp/gradle-unit.log; then
+            # Surface compile errors and failed tests as annotations (readable
+            # from the run page and the checks API without downloading logs).
+            grep -E '^e: |FAILED$|Error|Exception|expected' /tmp/gradle-unit.log | head -60 | while IFS= read -r line; do
+              line="${line//'%'/'%25'}"; echo "::error::${line}"
+            done
+            exit 1
+          fi
+
+      - name: Upload unit-test reports on failure
+        # Inspect failures from the run page (Artifacts) instead of committing
+        # generated reports back into the repository.
+        if: failure() && steps.unittests.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports
+          path: |
+            /tmp/gradle-unit.log
+            android/app/build/reports/tests/testDebugUnitTest
+            android/app/build/test-results/testDebugUnitTest
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Setup Signing Keystore
+        working-directory: android
+        env:
+          BDS_KEYSTORE: ${{ secrets.BDS_KEYSTORE }}
+        run: |
+          if [ -n "$BDS_KEYSTORE" ]; then
+            echo "Decoding release keystore from secrets..."
+            echo "$BDS_KEYSTORE" | base64 --decode > ci-release.jks
+          elif [ -f "app/superdeepseek-release.jks" ]; then
+            echo "Using permanent Super DeepSeek release keystore..."
+            cp app/superdeepseek-release.jks ci-release.jks
+          else
+            echo "Generating fallback release keystore..."
+            keytool -genkeypair -v \
+              -keystore ci-release.jks \
+              -alias superdeepseek \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 20000 \
+              -storepass superdeepseek \
+              -keypass superdeepseek \
+              -dname "CN=SuperDeepSeek, OU=Mobile, O=SuperDeepSeek, L=Dhaka, ST=Dhaka, C=BD"
+          fi
+          ls -la ci-release.jks
+      - name: Build Android Release APK
+        working-directory: android
+        run: |
+          set -o pipefail
+          if ! ./gradlew --no-daemon assembleRelease -PbdsBuildId=${{ github.run_number }} 2>&1 | tee /tmp/gradle-release.log; then
+            grep -E '^e: |^w: .*(error)|FAILED|Error' /tmp/gradle-release.log | head -40 | while IFS= read -r line; do
+              line="${line//'%'/'%25'}"; echo "::error::${line}"
+            done
+            exit 1
+          fi
+        env:
+          BDS_KEYSTORE_PASSWORD: ${{ secrets.BDS_KEYSTORE_PASSWORD || 'superdeepseek' }}
+          BDS_KEY_ALIAS: ${{ secrets.BDS_KEY_ALIAS || 'superdeepseek' }}
+          BDS_KEY_PASSWORD: ${{ secrets.BDS_KEY_PASSWORD || 'superdeepseek' }}
+      - name: Prepare APK and Compute Checksums
+        id: prep
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          APK_RAW=$(find android/app/build/outputs/apk/release -name "*release*.apk" ! -name "*unaligned*" | head -n 1)
+          if [ -z "$APK_RAW" ]; then
+            APK_RAW=$(find android/app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          fi
+          if [ -z "$APK_RAW" ]; then
+            echo "Error: No release APK found in android/app/build/outputs/apk/release!"
+            exit 1
+          fi
+          APK_NAME="super-deepseek-latest.apk"
+          cp "$APK_RAW" "$APK_NAME"
+          sha256sum "$APK_NAME" > "${APK_NAME}.sha256"
+          echo "apk_path=$APK_NAME" >> "$GITHUB_OUTPUT"
+          echo "checksum_path=${APK_NAME}.sha256" >> "$GITHUB_OUTPUT"
+          echo "--- Prepared Artifacts ---"
+          ls -lh "$APK_NAME" "${APK_NAME}.sha256"
+          cat "${APK_NAME}.sha256"
+          echo "=== APK contents ==="
+          unzip -l "$APK_NAME" | grep -E "assets/bds/|lib/" | head -n 20
+          echo "=== Native libraries (sandbox) ==="
+          unzip -l "$APK_NAME" | grep -E "lib/.*\.so|assets/sandbox" || echo "::warning::APK has no sandbox runtime"
+      - name: Verify APK Signature
+        run: |
+          $ANDROID_HOME/build-tools/34.0.0/apksigner verify --verbose "${{ steps.prep.outputs.apk_path }}"
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: super-deepseek-apk
+          path: |
+            *.apk
+            *.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  lint:
+    # Diagnostics only: Android Lint and Kotlin compiler warnings, reported as
+    # annotations. Never blocks the build or the release.
+    name: Lint (report only)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle*
+            android/**/gradle-wrapper.properties
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools platforms;android-34 build-tools;34.0.0
+      - name: Android Lint
+        working-directory: android
+        run: |
+          printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
+          chmod +x ./gradlew
+          ./gradlew --no-daemon lintDebug -Dorg.gradle.jvmargs=-Xmx3g 2>&1 | tee /tmp/gradle-lint.log || true
+          python3 ../scripts/ci_annotate_lint.py app/build/reports/lint-results-debug.xml /tmp/gradle-lint.log
+
+  release:
+    name: Publish Release
+    needs: build-apk
+    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/v3-real-exact-ui' || (github.event_name == 'workflow_dispatch' && inputs.publish == true)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: super-deepseek-apk
+      - id: rel_cfg
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"; echo "title=Super DeepSeek v${VERSION}" >> "$GITHUB_OUTPUT"; else echo "tag=latest" >> "$GITHUB_OUTPUT"; echo "title=Super DeepSeek (Continuous Build #${{ github.run_number }})" >> "$GITHUB_OUTPUT"; fi
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.rel_cfg.outputs.tag }}
+          name: ${{ steps.rel_cfg.outputs.title }}
+          body: |
+            ### Super DeepSeek for Android
+
+            **Version:** `${{ steps.rel_cfg.outputs.version }}`
+            **Build:** `${{ github.run_number }}`
+            **Commit:** `${{ github.sha }}`
+
+            The official DeepSeek chat, supercharged: the Super DeepSeek engine runs on
+            top of chat.deepseek.com inside a native Android shell.
+
+            #### Highlights
+            - An AI agent with its own Linux (Alpine) that writes, runs and tests code until the task is done; Stop is always there
+            - Linux Studio: terminal, files and live preview
+            - Slash commands, snippets and a command palette
+            - Memory, personas, system prompts, skills and projects
+            - MCP servers, Deep Research, web fetch, code runners and file tools
+            - Export chats (Markdown, PDF, HTML, image), light and dark themes
+            - Native file / camera picker, downloads, haptics and in-app updates
+
+            Install on Android 8.0+ and sign in with your DeepSeek account.
+            Builds are signed with the same key, so each one installs as an update.
+
+            > **Coming from a build before the package rename?** The app is now `com.superdeepseek.app`,
+            > so it installs next to the old `com.betterdeepseek.app` instead of over it. Export your
+            > settings in the old app (Advanced settings → Integrations & backup → Export), import them
+            > here, then uninstall the old app. Details in the README.
+
+            <!-- bds-build-id: ${{ github.run_number }} -->
+          files: |
+            *.apk
+            *.sha256
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
