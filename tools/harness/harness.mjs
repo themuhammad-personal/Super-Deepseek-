@@ -37,16 +37,28 @@ export const ENGINE_SEQUENCE = [
 
 export async function resolveExecutablePath() {
   if (process.env.PUPPETEER_EXECUTABLE_PATH) return process.env.PUPPETEER_EXECUTABLE_PATH;
+  // A system Chrome beats the bundled one (CI runners ship /usr/bin/google-chrome).
+  for (const p of ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser']) {
+    if (fs.existsSync(p)) return p;
+  }
   const chromium = require('@sparticuz/chromium');
   return chromium.executablePath();
 }
 
 export async function launchBrowser() {
-  const chromium = require('@sparticuz/chromium');
   const puppeteer = require('puppeteer-core');
+  // @sparticuz/chromium ships Lambda-flavoured flags (--single-process,
+  // --no-zygote) that crash a desktop Chrome. Use them only for the bundled
+  // binary; a system Chrome (CI: PUPPETEER_EXECUTABLE_PATH) gets plain flags.
+  const useBundled = !process.env.PUPPETEER_EXECUTABLE_PATH;
+  const chromium = require('@sparticuz/chromium');
+  const executablePath = await resolveExecutablePath();
+  const args = useBundled
+    ? chromium.args
+    : ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--font-render-hinting=none'];
   return puppeteer.launch({
-    executablePath: await resolveExecutablePath(),
-    args: chromium.args,
+    executablePath,
+    args,
     headless: true,
     defaultViewport: { width: 412, height: 915, isMobile: true, hasTouch: true },
   });

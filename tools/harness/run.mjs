@@ -360,7 +360,16 @@ const ALL = {
 const requested = process.argv.slice(2);
 const names = requested.length ? requested : Object.keys(ALL);
 
-const browser = await launchBrowser();
+const browser = await launchBrowser().catch((e) => {
+  // Even a launch crash must leave a report behind for the CI artifact.
+  fs.mkdirSync(ARTIFACTS, { recursive: true });
+  fs.writeFileSync(path.join(ARTIFACTS, 'report.json'), JSON.stringify([{
+    name: 'browser-launch', pass: false, skipped: false,
+    failures: [String(e && e.message || e)], notes: [], ms: 0,
+  }], null, 2));
+  console.error('browser launch failed:', e && e.message || e);
+  process.exit(1);
+});
 for (const name of names) {
   const scenario = ALL[name];
   if (!scenario) { console.error('unknown scenario', name); continue; }
@@ -384,7 +393,7 @@ for (const name of names) {
     (outcome.failures.length ? '\n  - ' + outcome.failures.join('\n  - ') : '') +
     (outcome.notes.length ? '\n  note: ' + outcome.notes.join('; ') : ''));
 }
-await browser.close();
+await browser.close().catch(() => {});
 
 fs.mkdirSync(ARTIFACTS, { recursive: true });
 fs.writeFileSync(path.join(ARTIFACTS, 'report.json'), JSON.stringify(results, null, 2));
