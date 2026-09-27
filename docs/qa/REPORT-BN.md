@@ -91,3 +91,24 @@ APK বসিয়ে (CI-এর `super-deepseek-apk` আর্টিফ্য�
 | `c0c443d` | fix(harness): ডেস্টপ Chrome-এ লঞ্চ ফ্ল্যাগ (CI harness সবুজ) |
 
 সব কমিটের আগে `node scripts/brand-check.mjs` চালানো হয়েছে (clean)। `content.js`-এ সব এডিট asserted single-match replacement + `node --check`। জেনারেটেড আর্টিফ্যাক্ট (স্ক্রিনশট, `node_modules`, jniLibs, sandbox assets) কমিট করা হয়নি।
+
+---
+
+## পরিশিষ্ট: ফোন টেস্ট স্ক্রিপ্ট (৫–১০ মিনিট, বাস্তব ডিভাইস)
+
+পূর্ববর্তী বাগ-হান্ট শাখার রিপোর্ট থেকে সংরক্ষিত — রিলিজ-পূর্ব রিয়েল-ডিভাইস যাচাইয়ের চেকলিস্ট:
+
+1. Launch — wordmark ১৮s, বারের রং
+2. Sign-in
+3. Slash `/` popup
+4. Agent ছোট todo preview
+5. Agent দীর্ঘ ১০ মিনিট background
+6. Scroll guard
+7. Linux Studio terminal/files/preview/export
+8. Upload ৪০MB+
+9. মিশ্র BN/AR bidi
+10. Crash/rotation
+
+## পরিশিষ্ট: পরিচিত ঝুঁকি (সীমাবদ্ধ যাচাই)
+
+- ১৬KB ELF, background ১০-মিনিট stall, DOM drift, ১০০MB upload, PTY — সম্পূর্ণ যাচাই হয়নি।
