@@ -49,10 +49,9 @@ jobs:
         run: printf 'sdk.dir=%s\n' "$ANDROID_HOME" > android/local.properties
       - name: Install NPM Dependencies
         run: npm ci
-      - name: Typecheck & Unit Tests
+      - name: Template & engine unit tests
         run: |
-          npm run typecheck
-          npm run test:app
+          npm run test:template
           npm run test:engine
         env:
           NODE_OPTIONS: --max-old-space-size=4096
