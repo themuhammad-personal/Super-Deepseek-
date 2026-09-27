@@ -26,3 +26,6 @@ android/app/src/main/assets/bds/
 
 # Python bytecode
 __pycache__/
+
+# Android SDK location (machine-local)
+android/local.properties

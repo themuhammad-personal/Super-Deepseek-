@@ -4,7 +4,7 @@ import { BottomSheet } from "./ui/bottom-sheet";
 import { Card, Field, Row, Segment, Toggle } from "./ui/controls";
 import { useAppStore } from "@/lib/app-store";
 import { t } from "@/lib/i18n";
-import { ragClear, ragList } from "@/lib/rag";
+import { ragClear } from "@/lib/rag";
 import { SEARCH_PROVIDERS } from "@/lib/search-providers";
 import {
   BACKUP_SECTIONS,
@@ -527,8 +527,4 @@ export function SettingsSheet() {
       ) : null}
     </BottomSheet>
   );
-}
-
-export function refreshRagCount() {
-  void ragList().then((d) => useAppStore.getState().setRagCount(d.length));
 }

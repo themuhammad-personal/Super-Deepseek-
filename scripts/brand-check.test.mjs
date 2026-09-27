@@ -305,26 +305,20 @@ test("cli: a non-game with a compliant card passes", () => {
 
 const readDoc = (rel) => readFileSync(join(TEMPLATE_ROOT, rel), "utf8");
 
-test("SKILL.md and AGENTS.md name the marker path and bound this script uses", () => {
+// The og skill (`.grok/skills/og/`) shipped with the template and is gone with
+// it; AGENTS.md is the only prompt left that owns these bounds.
+test("AGENTS.md names the marker path and bound this script uses", () => {
   // Prose wraps, so the minute count may straddle a line break.
   const bound = new RegExp(`${OG_PENDING_MAX_AGE_MS / 60_000}\\s+minutes`);
-  for (const rel of [".grok/skills/og/SKILL.md", "AGENTS.md"]) {
-    const doc = readDoc(rel);
-    assert.ok(doc.includes(`/workspace/${OG_PENDING_REL_PATH}`), `${rel}: marker path`);
-    assert.ok(bound.test(doc), `${rel}: staleness bound`);
-  }
+  const doc = readDoc("AGENTS.md");
+  assert.ok(doc.includes(`/workspace/${OG_PENDING_REL_PATH}`), "AGENTS.md: marker path");
+  assert.ok(bound.test(doc), "AGENTS.md: staleness bound");
 });
 
-// The two places that own "never wait on the brand task". Scanning the whole
+// The section that owns "never wait on the brand task". Scanning the whole
 // of AGENTS.md instead would make every unrelated `wait_tasks` mention a future
 // feature adds to it this test's business.
 const PROHIBITION_SECTIONS = [
-  {
-    rel: ".grok/skills/og/SKILL.md",
-    label: '§ "Brand-asset pass"',
-    from: "## Brand-asset pass:",
-    until: /\n## /,
-  },
   {
     rel: "AGENTS.md",
     label: "execution loop step 6",
@@ -359,15 +353,5 @@ test("the sections that own the brand-task prohibition never affirm a wait", () 
       const context = prose.slice(Math.max(0, match.index - 60), match.index + 20);
       assert.ok(negation.test(before), `${where}: not a prohibition: …${context}…`);
     }
-  }
-});
-
-test("SKILL.md tells the pass to self-check with the flag this CLI accepts", () => {
-  const skill = readDoc(".grok/skills/og/SKILL.md");
-  const invocations = skill.match(/node scripts\/brand-check\.mjs[^\n`]*/g) ?? [];
-  assert.ok(invocations.length > 0);
-  for (const line of invocations) {
-    const argv = line.replace("node scripts/brand-check.mjs", "").trim().split(/\s+/);
-    assert.equal(parseBrandCheckArgs(argv.filter(Boolean)).error, undefined, line);
   }
 });

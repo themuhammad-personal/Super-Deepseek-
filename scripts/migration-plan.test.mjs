@@ -4,7 +4,6 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  readdirSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -56,11 +55,9 @@ test("non-.sql entries are dropped (readdir also yields the auth/ directory)", (
   assert.deepEqual(pendingMigrations(["auth", "README.md"], []), []);
 });
 
-test("the auth schema ships outside the globbed directory", () => {
-  const migrationsDir = join(projectRoot(), "migrations");
-  assert.deepEqual(pendingMigrations(readdirSync(migrationsDir), []), []);
-  assert.ok(readdirSync(join(migrationsDir, "auth")).includes("0001_auth.sql"));
-});
+// The template's migrations/ tree (auth schema outside the glob) shipped with
+// the grok workspace and was removed with it; migrate.mjs treats a missing
+// migrations/ as "nothing to do", so there is no shipped layout to pin here.
 
 test("this workspace's auth schema copy is byte-identical to its source", () => {
   // An edited copy diverges silently: basename keying skips it on a database

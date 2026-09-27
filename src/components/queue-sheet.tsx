@@ -2,7 +2,6 @@ import { BottomSheet } from "./ui/bottom-sheet";
 import { useAppStore } from "@/lib/app-store";
 import { t } from "@/lib/i18n";
 import { sendChat } from "@/lib/send-chat";
-
 export function QueueSheet() {
   const open = useAppStore((s) => s.ui.queueOpen);
   const queue = useAppStore((s) => s.queue);
@@ -61,18 +60,4 @@ export function QueueSheet() {
       )}
     </BottomSheet>
   );
-}
-
-export async function flushQueue(): Promise<void> {
-  const items = [...useAppStore.getState().queue];
-  for (const item of items) {
-    useAppStore.getState().dequeue(item.id);
-    await sendChat({
-      chatId: item.chatId,
-      content: item.content,
-      attachments: item.attachments,
-      mode: item.mode,
-      webSearch: item.webSearch,
-    });
-  }
 }
