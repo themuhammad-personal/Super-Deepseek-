@@ -7,19 +7,10 @@
     "nf3": "0.3.17"
   },
   "scripts": {
-    "dev": "node scripts/with-app-env.mjs vite dev --host 0.0.0.0 --port 8080",
-    "build": "node scripts/with-app-env.mjs vite build && npm run db:migrate",
-    "db:migrate": "node scripts/migrate.mjs",
-    "build:dev": "node scripts/with-app-env.mjs vite build --mode development",
-    "preview": "node scripts/with-app-env.mjs vite preview",
-    "preview:restart": "node scripts/preview.mjs restart",
-    "preview:stop": "node scripts/preview.mjs stop",
-    "typecheck": "tsc --noEmit",
-    "check:auth": "node scripts/check-auth-invariant.mjs",
-    "test": "npm run test:app && npm run test:engine",
-    "test:template": "node --test scripts/brand-check.test.mjs scripts/browser-smoke-verdict.test.mjs scripts/check-auth-invariant.test.mjs scripts/migration-plan.test.mjs scripts/preview.test.mjs scripts/sign-out-plan.test.mjs scripts/with-app-env.test.mjs scripts/write-atomic.test.mjs",
-    "test:engine": "node --test 'android/app/src/test/js/*.test.mjs'",
-    "test:app": "node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/i18n.test.ts src/lib/group-chats.test.ts src/lib/artifacts.test.ts src/lib/ai/system-prompt.test.ts src/lib/deepseek/parse-sse.test.ts src/lib/deepseek/pow.test.ts src/lib/deepseek/api.test.ts src/lib/deepseek/history.test.ts src/lib/mcp-client.test.ts src/lib/mcp-presets.test.ts src/lib/search-providers.test.ts src/lib/tool-tags.test.ts src/lib/utils.test.ts",
+    "test": "npm run test:template && npm run test:engine",
+    "test:template": "node --test scripts/*.test.mjs",
+    "test:engine": "node --test android/app/src/test/js/*.test.mjs",
+    "test:harness": "node tools/harness/run.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
     "android:assemble:release": "cd android && ./gradlew assembleRelease",
@@ -82,6 +73,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.20.0",
+    "@sparticuz/chromium": "^131.0.1",
     "@types/marked": "^5.0.2",
     "@types/node": "^22.16.5",
     "@types/pg": "^8.11.10",
@@ -98,10 +90,11 @@
     "nitro": "3.0.260610-beta",
     "playwright": "^1.62.0",
     "prettier": "^3.4.0",
+    "puppeteer-core": "^23.11.1",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.56.1",
     "vite": "^8.2.0"
   },
-  "version": "1.8.3",
-  "description": "Super DeepSeek \u2014 Claude-class native client for DeepSeek"
+  "version": "1.9.0",
+  "description": "Super Deep Seek Android app \u2014 DeepSeek chat in an Android WebView with the project agent engine injected."
 }

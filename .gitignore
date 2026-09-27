@@ -16,6 +16,7 @@ design-preview/runtime-styles.css
 
 # CI failure reports are uploaded as workflow artifacts, never committed
 android/ci-debug/
+tools/harness/artifacts/
 
 # Linux sandbox runtime, fetched by scripts/fetch_sandbox_deps.py (CI)
 android/app/src/main/jniLibs/
@@ -26,3 +27,6 @@ android/app/src/main/assets/bds/
 
 # Python bytecode
 __pycache__/
+
+# Android SDK location (machine-local)
+android/local.properties

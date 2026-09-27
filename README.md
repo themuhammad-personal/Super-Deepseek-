@@ -8,11 +8,11 @@
 
 Linux Studio · AI agent · slash commands · memory · MCP tools · Deep Research · one-tap exports
 
-[![Download APK](https://img.shields.io/badge/Download-APK-4d6bfe?style=for-the-badge&logo=android&logoColor=white)](https://github.com/themuhammad-personal/Deepseek-/releases/latest/download/super-deepseek-latest.apk)
+[![Download APK](https://img.shields.io/badge/Download-APK-4d6bfe?style=for-the-badge&logo=android&logoColor=white)](https://github.com/themuhammad-personal/Super-Deepseek-/releases/latest/download/super-deepseek-latest.apk)
 &nbsp;
-[![Latest release](https://img.shields.io/github/v/release/themuhammad-personal/Deepseek-?style=for-the-badge&label=release&color=1f2233)](https://github.com/themuhammad-personal/Deepseek-/releases)
+[![Latest release](https://img.shields.io/github/v/release/themuhammad-personal/Super-Deepseek-?style=for-the-badge&label=release&color=1f2233)](https://github.com/themuhammad-personal/Super-Deepseek-/releases)
 
-[![Build](https://github.com/themuhammad-personal/Deepseek-/actions/workflows/build-and-release-apk.yml/badge.svg)](https://github.com/themuhammad-personal/Deepseek-/actions/workflows/build-and-release-apk.yml)
+[![Build](https://github.com/themuhammad-personal/Super-Deepseek-/actions/workflows/build-and-release-apk.yml/badge.svg)](https://github.com/themuhammad-personal/Super-Deepseek-/actions/workflows/build-and-release-apk.yml)
 ![Android 8.0+](https://img.shields.io/badge/Android-8.0%2B-3ddc84?logo=android&logoColor=white)
 ![Languages](https://img.shields.io/badge/UI-6%20languages-8a63d2)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -135,7 +135,7 @@ else below is extra.
 
 ## Install
 
-1. Download **[super-deepseek-latest.apk](https://github.com/themuhammad-personal/Deepseek-/releases/latest/download/super-deepseek-latest.apk)** on your phone.
+1. Download **[super-deepseek-latest.apk](https://github.com/themuhammad-personal/Super-Deepseek-/releases/latest/download/super-deepseek-latest.apk)** on your phone.
 2. Open it and allow installing from this source when Android asks.
 3. Sign in with your DeepSeek account. That's it.
 
@@ -208,7 +208,7 @@ design is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ```bash
 npm ci
-npm run typecheck && npm run test:app && npm run test:engine   # checks
+npm run test:template && npm run test:engine   # checks
 npm run android:stage-engine          # copy the engine into the APK assets
 python3 scripts/fetch_sandbox_deps.py # proot + libraries for the Linux sandbox (optional)
 cd android && ./gradlew testDebugUnitTest assembleRelease
@@ -231,9 +231,9 @@ steps, verifies the APK signature and publishes releases:
 | `android/app/src/main/java/com/superdeepseek/app/` | Kotlin shell: `MainActivity`, `WebViewBridge`, `UpdateChecker`, the sandbox (`Sandbox`, `SandboxTools`, `SandboxService`) and Linux Studio (`StudioActivity`, `StudioPreview`) |
 | `android/app/src/main/bds-assets/bds/` | The Super DeepSeek engine bundle (`content.js`, `injected.js`, `sd-agent.js`, styles, sandbox pages) |
 | `android/app/src/test/` | JVM unit tests (`java/`) and engine tests (`js/`) |
-| `docs/` | Architecture notes, the maintainer brief and third-party licenses (`archive/` holds the retired SPA design) |
+| `docs/` | Architecture notes, the maintainer brief and third-party licenses |
 | `scripts/` | Build helpers: `fetch_sandbox_deps.py` for the sandbox runtime, `bds-sync.sh` for upstream diffs (dry run by default) |
-| `src/` | The retired React SPA. It is not part of the APK, but its unit tests still run in CI. |
+
 </details>
 
 ## Privacy
@@ -251,7 +251,7 @@ The app only contacts other services when a feature needs them:
 
 Issues and pull requests are welcome, especially translations, bug reports with screenshots,
 and new commands or tools.
-[Open an issue →](https://github.com/themuhammad-personal/Deepseek-/issues/new)
+[Open an issue →](https://github.com/themuhammad-personal/Super-Deepseek-/issues/new)
 
 ## License
 

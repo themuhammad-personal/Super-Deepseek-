@@ -376,6 +376,21 @@ test('continuity: nudges are counted per instruction; tool calls in between neve
   assert.equal(engine.sent.length, 3);
 });
 
+test('continuity: a reply end is scheduled once even when the thread stops changing', async () => {
+  const { win } = load({ history: unfinishedChain, speed: 20 });
+  const engine = fakeEngine(win);
+  let repros = 0;
+  win.__sdEngine.reprocess = () => { repros++; };
+  // The old watcher missed short replies that streamed between two polls; the
+  // fallback ends the reply from thread evidence, but must do so exactly once
+  // (reprocess or an outgoing quiet send must not retrigger the timers).
+  win.__sdAgent._noteReplyEnd();
+  win.__sdAgent._noteReplyEnd();
+  win.__sdAgent._noteReplyEnd();
+  await wait(340);
+  assert.equal(repros, 3, 'exactly one reply-end schedule (REPROCESS_AT has 3 timers)');
+});
+
 test('continuity: no nudge when the agent did no work for the current instruction', async () => {
   const { win } = load({ history: unfinishedChain, speed: 20 });
   const engine = fakeEngine(win);
@@ -508,4 +523,81 @@ test('scroll guard: the agent UI and small or editable scrollers are left alone'
   fire('scroll', { target: tiny });
   tiny.top = 820;
   fire('scroll', { target: tiny });
+});
+
+// ── Continue task chip (stalled loop after a crash/reload) ─────────────────
+
+test('stall detection: a tool call with no result is the missing-result case', () => {
+  const { win } = load();
+  const s = win.__sdAgent._lastTaskStall;
+  const call = '<SDS:AUTO:MCP url="sandbox" tool="run">{"command":"ls"}</SDS:AUTO:MCP>';
+  assert.equal(s([{ role: 'USER', content: 'do it' }, { role: 'ASSISTANT', content: call }]), 'missing-result');
+  assert.equal(s([{ role: 'USER', content: 'do it' }, { role: 'ASSISTANT', content: 'Running:\n' + call }]), 'missing-result');
+  // A result arrived after the call: the chain moved on — nothing owed.
+  assert.equal(s([
+    { role: 'USER', content: 'do it' },
+    { role: 'ASSISTANT', content: call },
+    { role: 'USER', content: mcpResult('run') },
+    { role: 'ASSISTANT', content: 'All done, tests pass.' },
+  ]), null);
+});
+
+test('stall detection: unreadable tool tags and unfinished prose', () => {
+  const { win } = load();
+  const s = win.__sdAgent._lastTaskStall;
+  assert.equal(s([{ role: 'ASSISTANT', content: '<SDS:AUTO:MCP url="sandbox" tool="run">{"command":"echo "x""}</SDS:AUTO:MCP>' }]), 'unreadable');
+  assert.equal(s([{ role: 'USER', content: 'go' }, { role: 'ASSISTANT', content: 'Files are written. Now I will run the tests:' }]), 'unfinished');
+  assert.equal(s([{ role: 'ASSISTANT', content: 'Here is the app: https://x/app.apk. Let me know if you need a dark theme.' }]), null);
+  assert.equal(s([{ role: 'USER', content: 'thanks' }]), null);
+  assert.equal(s([]), null);
+  assert.equal(s([{ role: 'ASSISTANT', content: '' }]), null);
+});
+
+test('stall detection: a non-sandbox tool call is not our stalled chain', () => {
+  const { win } = load();
+  const s = win.__sdAgent._lastTaskStall;
+  assert.equal(s([{ role: 'ASSISTANT', content: '<SDS:AUTO:MCP url="https://other.example/mcp" tool="run">{"command":"x"}</SDS:AUTO:MCP>' }]), null);
+});
+
+test('continue bodies tell the model to never repeat finished work', () => {
+  const { win } = load();
+  const b = win.__sdAgent._continueBody;
+  for (const kind of ['missing-result', 'unreadable', 'unfinished']) {
+    const body = b(kind);
+    assert.match(body, /Never repeat work that is already done|never run it again/);
+  }
+  assert.match(b('missing-result'), /no result/);
+  assert.match(b('unreadable'), /valid JSON/);
+  assert.match(b('missing-result'), /if it already ran, never run it again/i);
+});
+
+test('continue chip: after a reload stall the user is offered the next step', async () => {
+  const history = [
+    { role: 'USER', content: 'make an app' },
+    { role: 'ASSISTANT', content: 'Building first:\n<SDS:AUTO:MCP url="sandbox" tool="run">{"command":"ls"}</SDS:AUTO:MCP>' },
+  ];
+  const { win } = load({ history });
+  win.__sdEngine = { isGenerating: () => false, reprocess: () => {}, sendQuiet: () => {} };
+  assert.equal(win.__sdAgent._continueKind(), null);
+  win.__sdAgent._maybeOfferContinue();
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(win.__sdAgent._continueKind(), 'missing-result');
+});
+
+test('continue chip: no offer while the model is still writing or the agent is stopped', async () => {
+  const history = [
+    { role: 'USER', content: 'make an app' },
+    { role: 'ASSISTANT', content: 'Building first:\n<SDS:AUTO:MCP url="sandbox" tool="run">{"command":"ls"}</SDS:AUTO:MCP>' },
+  ];
+  const { win } = load({ history });
+  win.__sdEngine = { isGenerating: () => true, reprocess: () => {}, sendQuiet: () => {} };
+  win.__sdAgent._maybeOfferContinue();
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(win.__sdAgent._continueKind(), null);
+
+  win.__sdEngine.isGenerating = () => false;
+  win.__sdAgent.stop(true);
+  win.__sdAgent._maybeOfferContinue();
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(win.__sdAgent._continueKind(), null);
 });

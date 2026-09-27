@@ -5,12 +5,15 @@ on:
     branches:
       - main
       - v3-real-exact-ui
-      - arena/**
+      - qa/real-world-testing
+      - arena/01a0cebd-deepseek
+      - arena/01a0dc4d-deepseek
     tags:
       - "v*"
   pull_request:
     branches:
       - main
+      - qa/real-world-testing
   workflow_dispatch:
     inputs:
       publish:
@@ -46,10 +49,9 @@ jobs:
         run: printf 'sdk.dir=%s\n' "$ANDROID_HOME" > android/local.properties
       - name: Install NPM Dependencies
         run: npm ci
-      - name: Typecheck & Unit Tests
+      - name: Template & engine unit tests
         run: |
-          npm run typecheck
-          npm run test:app
+          npm run test:template
           npm run test:engine
         env:
           NODE_OPTIONS: --max-old-space-size=4096
@@ -205,8 +207,11 @@ jobs:
           ./gradlew --no-daemon lintDebug -Dorg.gradle.jvmargs=-Xmx3g 2>&1 | tee /tmp/gradle-lint.log || true
           python3 ../scripts/ci_annotate_lint.py app/build/reports/lint-results-debug.xml /tmp/gradle-lint.log
 
-  engine-harness:
-    name: Engine Harness (Layer 2 — Chromium)
+  harness:
+    # Layer 2: the real engine bundle in a real Chromium against the chat
+    # fixture (tools/harness/). Report-only until the job proves stable;
+    # screenshots + report.json are uploaded as artifacts, never committed.
+    name: Engine harness (report only)
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -217,26 +222,35 @@ jobs:
           cache: npm
       - name: Install NPM Dependencies
         run: npm ci
-      - name: Run engine unit tests
-        run: npm run test:engine
-      - name: Run harness dry-run
-        run: |
-          node tools/harness/run.mjs --fixture android/app/src/test/fixtures/deepseek-realistic.html 2>&1 | tee /tmp/harness.log
-          echo "=== harness report ===" && cat /tmp/harness.log
-      - name: Upload harness log
+      - name: Real-engine harness scenarios
+        run: npm run test:harness
+        env:
+          PUPPETEER_EXECUTABLE_PATH: /usr/bin/google-chrome
+      - name: Upload harness report and screenshots
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: harness-log
-          path: /tmp/harness.log
+          name: harness-report
+          path: tools/harness/artifacts
           if-no-files-found: ignore
           retention-days: 14
 
-  emulator-tests:
-    name: Emulator Tests (Layer 3 — Android)
+  emulator:
+    # Layer 3: real Android boots of the debug APK (API 30/34/35). Report-only
+    # until the job proves stable; screenshots + logcat are artifacts.
+    name: Emulator smoke (API ${{ matrix.api-level }})
     runs-on: ubuntu-latest
     continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: [30, 34, 35]
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -248,30 +262,40 @@ jobs:
       - uses: android-actions/setup-android@v4
         with:
           packages: platform-tools platforms;android-34 build-tools;34.0.0
+      - name: Write Android local.properties
+        run: printf 'sdk.dir=%s\n' "$ANDROID_HOME" > android/local.properties
+      - name: Install NPM Dependencies
+        run: npm ci
+      - name: Stage Super DeepSeek engine assets
+        run: |
+          mkdir -p android/app/src/main/assets
+          rm -rf android/app/src/main/assets/bds
+          cp -r android/app/src/main/bds-assets/bds android/app/src/main/assets/bds
+      - name: Build debug APK
+        working-directory: android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon assembleDebug -Dorg.gradle.jvmargs=-Xmx3g
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: Run instrumented tests on emulator (API 34)
+      - name: Boot emulator and smoke-test the app
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 34
-          target: google_apis
+          api-level: ${{ matrix.api-level }}
           arch: x86_64
-          script: |
-            printf 'sdk.dir=%s\n' "$ANDROID_HOME" > android/local.properties
-            chmod +x android/gradlew
-            android/gradlew --no-daemon connectedDebugAndroidTest 2>&1 | tee /tmp/emulator.log
-      - name: Upload emulator logs and screenshots
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash android/ci/emulator-smoke.sh
+      - name: Upload smoke screenshots and logcat
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: emulator-artifacts
-          path: |
-            /tmp/emulator.log
-            android/app/build/reports/androidTests
-            android/app/build/outputs/androidTest-results
+          name: emulator-smoke-api-${{ matrix.api-level }}
+          path: /tmp/emulator-smoke
           if-no-files-found: ignore
           retention-days: 14
 

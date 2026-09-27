@@ -475,6 +475,12 @@ class MainActivity : ComponentActivity() {
         val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
 
+        // Layer 4 (owner debugging): chrome://inspect can see this WebView in
+        // debug builds only. Release builds keep WebView inspection off.
+        if (BuildConfig.DEBUG) {
+            android.webkit.WebView.setWebContentsDebuggingEnabled(true)
+        }
+
         // The system splash hands over on our first frame: that frame is already
         // the native launch screen (same background colour, icon at the same
         // centre), which then covers the page until it is really ready. Holding
@@ -577,13 +583,18 @@ class MainActivity : ComponentActivity() {
                     super.onPageStarted(view, url, favicon)
                     // The bridge (storage, files, MCP keys, the Linux sandbox) only
                     // serves the DeepSeek page — never a foreign page this WebView
-                    // may be redirected to.
-                    bridge.trustedPage = isTrustedBridgeUrl(url)
+                    // may be redirected to. Iframe navigations (OAuth, hCaptcha)
+                    // also land here on some WebView versions; only the main
+                    // frame's URL decides (MainFrameTracker).
+                    bridge.trustedPage = MainFrameTracker.trustedForPage(url, view.url)
                 }
                 override fun onPageFinished(view: WebView, url: String?) {
                     super.onPageFinished(view, url)
                     Log.d("SuperDeepSeek", "Official WebView loaded: $url")
-                    if (url?.contains("chat.deepseek.com") == true) {
+                    // Main frame only, host-checked (never `contains`): an iframe
+                    // finish or a foreign URL carrying "chat.deepseek.com" in its
+                    // query string must not receive the engine bundle.
+                    if (MainFrameTracker.shouldInjectEngine(url, view.url)) {
                         // The engine bundle (once per document, see injectBdsScripts).
                         injectBdsScripts(view)
                         // The launch screen stays until the enhanced page is really
@@ -784,8 +795,15 @@ class MainActivity : ComponentActivity() {
                 })();
             """.trimIndent()
             // Native glue, then the sandbox agent glue (it wraps sd-native's bridge
-            // fetch), then the sheet gestures (they wrap content.js's Back handler).
-            val native = listOfNotNull(readAsset("sd-native.js"), readAsset("sd-agent.js"), readAsset("sd-sheets.js"))
+            // fetch), then the sheet gestures (they wrap content.js's Back handler),
+            // and the DOM health check (it watches DeepSeek's selectors and warns
+            // the user when the site updates underneath the engine).
+            val native = listOfNotNull(
+                readAsset("sd-native.js"),
+                readAsset("sd-agent.js"),
+                readAsset("sd-sheets.js"),
+                readAsset("sd-health.js"),
+            )
                 .joinToString("\n;\n").ifEmpty { null }
             return EngineAssets(readAsset("injected.js"), cssJs, readAsset("content.js"), native)
                 .also { engineAssets = it }

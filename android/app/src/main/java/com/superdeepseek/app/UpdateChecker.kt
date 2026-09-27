@@ -447,7 +447,7 @@ internal class UpdateChecker(
 
         private const val DEFAULT_API_BASE_URL = "https://api.github.com"
         private const val DEFAULT_REPO_OWNER = "themuhammad-personal"
-        private const val DEFAULT_REPO_NAME = "Deepseek-"
+        private const val DEFAULT_REPO_NAME = "Super-Deepseek-"
 
         /**
          * GitHub's API rejects requests without a User-Agent and asks integrators to identify
