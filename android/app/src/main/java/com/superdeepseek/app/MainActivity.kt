@@ -475,6 +475,12 @@ class MainActivity : ComponentActivity() {
         val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
 
+        // Layer 4 (owner debugging): chrome://inspect can see this WebView in
+        // debug builds only. Release builds keep WebView inspection off.
+        if (BuildConfig.DEBUG) {
+            android.webkit.WebView.setWebContentsDebuggingEnabled(true)
+        }
+
         // The system splash hands over on our first frame: that frame is already
         // the native launch screen (same background colour, icon at the same
         // centre), which then covers the page until it is really ready. Holding
