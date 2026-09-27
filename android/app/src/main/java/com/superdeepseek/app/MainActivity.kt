@@ -784,8 +784,15 @@ class MainActivity : ComponentActivity() {
                 })();
             """.trimIndent()
             // Native glue, then the sandbox agent glue (it wraps sd-native's bridge
-            // fetch), then the sheet gestures (they wrap content.js's Back handler).
-            val native = listOfNotNull(readAsset("sd-native.js"), readAsset("sd-agent.js"), readAsset("sd-sheets.js"))
+            // fetch), then the sheet gestures (they wrap content.js's Back handler),
+            // and the DOM health check (it watches DeepSeek's selectors and warns
+            // the user when the site updates underneath the engine).
+            val native = listOfNotNull(
+                readAsset("sd-native.js"),
+                readAsset("sd-agent.js"),
+                readAsset("sd-sheets.js"),
+                readAsset("sd-health.js"),
+            )
                 .joinToString("\n;\n").ifEmpty { null }
             return EngineAssets(readAsset("injected.js"), cssJs, readAsset("content.js"), native)
                 .also { engineAssets = it }

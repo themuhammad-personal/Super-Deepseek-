@@ -336,6 +336,7 @@
     clickOfficialStop();
     state.active = false;
     state.pending = 0;
+    hideContinueChip();
     render();
     if (!silent) toast(t('Agent stopped. Write a message to continue.', 'এজেন্ট থামানো হয়েছে। চালিয়ে যেতে একটি মেসেজ লিখুন।'));
   }
@@ -386,7 +387,7 @@
   var guard = { touching: false, moved: false, dragged: false, lastInput: 0, states: null, fix: null, epoch: 0 };
 
   /** The user sent a message: they want to follow the reply, wherever they were. */
-  function userSent() { guard.epoch++; }
+  function userSent() { guard.epoch++; hideContinueChip(); }
 
   function guardScroller(ev) {
     var tg = ev && ev.target;
@@ -575,10 +576,11 @@
       'If the task is complete, reply with one short line saying so and no tool call. Never repeat work that is already done.';
   }
 
-  function sendNudge(body) {
+  function sendNudge(body, countBudget) {
     var e = window.__sdEngine;
     if (!e || typeof e.sendQuiet !== 'function') return;
-    flow.nudges++;
+    // A user-tapped Continue never spends the automatic keep-going budget.
+    if (countBudget !== false) flow.nudges++;
     e.sendQuiet(['<SuperDeepSeek>', '[SDS:AUTO] Agent continue', body, '</SuperDeepSeek>'].join('\n'), 'Agent continue');
   }
 
@@ -600,6 +602,8 @@
     var callsAtEnd = flow.calls;
     REPROCESS_AT.forEach(function (ms) { flow.timers.push(setTimeout(reprocess, ms)); });
     flow.timers.push(setTimeout(function () { maybeNudge(callsAtEnd); }, NUDGE_AT));
+    // After the automatic path has had its chance, offer the human one.
+    flow.timers.push(setTimeout(function () { maybeOfferContinue(); }, NUDGE_AT + 1500));
   }
 
   function watchReplies() {
@@ -607,9 +611,121 @@
       syncLocale();
       var g = generating();
       if (g && flow.timers.length) { flow.timers.forEach(clearTimeout); flow.timers = []; }
+      if (g) hideContinueChip();
       if (flow.was && !g) onReplyEnd();
       flow.was = g;
     }, 500);
+  }
+
+  // ── Continue task chip ──────────────────────────────────────────────────────
+  //
+  // The run-once gate (sd_seen) rightly refuses to re-run finished tool calls,
+  // but a crash or reload right after a finished reply can leave the chain
+  // stalled with no automatic way forward. When the loop is idle and the last
+  // assistant reply still owes work — a tool call whose result never arrived,
+  // or an unfinished promise — the user gets one small chip: tap to let the
+  // agent continue (quietly, and told to never repeat finished work). It is
+  // user-initiated, so it never counts against the 2-nudge keep-going budget.
+
+  var CONTINUE_BODY = {
+    'missing-result': 'Your last tool call has no result in this chat. If it did not run, send that tool call again (once); if it already ran, never run it again. Then continue the task. Never repeat work that is already done.',
+    'unreadable': 'Your last tool call could not be read: its arguments must be one valid JSON object. Send the tool call again with valid JSON (escape quotes and newlines inside strings, or use base64Args). Never repeat work that is already done.',
+    'unfinished': 'Your last reply ended without a tool call. If steps of the task remain, continue now with the next tool call. If the task is complete, reply with one short line saying so and no tool call. Never repeat work that is already done.'
+  };
+
+  /**
+   * What the last assistant reply still owes the task, or null when the
+   * conversation is at rest. Pure scan of the history messages:
+   * 'missing-result' — a readable sandbox tool call is the last thing said
+   * (its result never arrived); 'unreadable' — tool tags the engine could not
+   * parse; 'unfinished' — the reply announces more work but carries no call.
+   */
+  function lastTaskStall(messages) {
+    if (!messages || !messages.length) return null;
+    var last = messages[messages.length - 1];
+    if (String((last && last.role) || '').toUpperCase() !== 'ASSISTANT') return null;
+    var text = messageText(last);
+    if (!text) return null;
+    var tags = parseTags(text).filter(function (tag) {
+      var a = tag.attrs || {};
+      return isSandboxUrl(a.url || a.serverUrl || '');
+    });
+    if (tags.length) {
+      return tags.some(function (tag) { return tagArgs(tag); }) ? 'missing-result' : 'unreadable';
+    }
+    return looksUnfinished(text) ? 'unfinished' : null;
+  }
+
+  function continueBody(kind) {
+    return CONTINUE_BODY[kind] || CONTINUE_BODY['unfinished'];
+  }
+
+  var continueChip = null;
+  var continueKind = null;
+
+  function ensureContinueChip() {
+    if (continueChip && document.body && document.body.contains(continueChip)) return continueChip;
+    if (!document.body) return null;
+    if (!document.getElementById('sd-agent-style')) {
+      var st = document.createElement('style');
+      st.id = 'sd-agent-style';
+      st.textContent = STYLE;
+      (document.head || document.documentElement).appendChild(st);
+    }
+    continueChip = document.createElement('div');
+    continueChip.id = 'sd-continue-chip';
+    continueChip.setAttribute('role', 'status');
+    continueChip.hidden = true;
+    var label = document.createElement('span');
+    label.className = 'sd-label';
+    label.textContent = t('Continue the task?', 'কাজটা চালিয়ে যাবেন?');
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = t('Continue task', 'কাজ চালিয়ে যান');
+    btn.addEventListener('click', function (ev) {
+      ev.preventDefault(); ev.stopPropagation();
+      var kind = continueKind;
+      hideContinueChip();
+      if (kind && !window.__sdAgentStopped) sendNudge(continueBody(kind), false);
+    });
+    var x = document.createElement('button');
+    x.type = 'button';
+    x.className = 'sd-x';
+    x.setAttribute('aria-label', t('Dismiss', 'বাতিল'));
+    x.textContent = '✕';
+    x.addEventListener('click', function (ev) { ev.preventDefault(); ev.stopPropagation(); hideContinueChip(); });
+    continueChip.appendChild(label);
+    continueChip.appendChild(btn);
+    continueChip.appendChild(x);
+    document.body.appendChild(continueChip);
+    return continueChip;
+  }
+
+  function showContinueChip(kind) {
+    continueKind = kind;
+    var c = ensureContinueChip();
+    if (c) c.hidden = false;
+  }
+
+  function hideContinueChip() {
+    continueKind = null;
+    var c = document.getElementById && document.getElementById('sd-continue-chip');
+    if (c) c.hidden = true;
+  }
+
+  /** Offer the chip only when the loop is truly idle and the task is stalled. */
+  function maybeOfferContinue() {
+    if (window.__sdAgentStopped || state.active || state.pending > 0 || mcpPending) return;
+    if (generating()) return;
+    var sid = sessionId();
+    if (!sid || !sandboxServers().length) return;
+    requestHistory(sid).then(function (messages) {
+      if (!messages || window.__sdAgentStopped || state.active || state.pending > 0 || mcpPending) return;
+      if (generating()) return;
+      var kind = lastTaskStall(messages);
+      if (kind) showContinueChip(kind);
+      else hideContinueChip();
+    });
   }
 
   // ── UI ─────────────────────────────────────────────────────────────────────
@@ -644,6 +760,18 @@
     '#sd-agent-confirm button{border:0;border-radius:12px;padding:10px 14px;font:600 13px/1 system-ui,sans-serif;',
     'background:var(--bds-bg-hover,rgba(255,255,255,.08));color:var(--bds-text-primary,#ececec)}',
     '#sd-agent-confirm button.sd-primary{background:#4d6bfe;color:#fff}',
+    // "Continue task" offer after a stalled loop (crash/reload mid-task).
+    '#sd-continue-chip{position:fixed;left:50%;transform:translateX(-50%);top:calc(env(safe-area-inset-top,0px) + 58px);',
+    'z-index:2147483000;display:flex;align-items:center;gap:8px;box-sizing:border-box;',
+    'padding:6px 6px 6px 14px;border-radius:999px;background:rgba(28,28,32,.94);color:#f1f1f3;',
+    'font:500 13px/1.2 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.28);',
+    '-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.08)}',
+    '#sd-continue-chip[hidden]{display:none}',
+    '#sd-continue-chip .sd-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.92}',
+    '#sd-continue-chip button{flex:none;display:flex;align-items:center;gap:6px;border:0;border-radius:999px;',
+    'padding:7px 12px;background:#4d6bfe;color:#fff;font:600 12px/1 system-ui,sans-serif}',
+    '#sd-continue-chip button:active{background:#3f5ce4}',
+    '#sd-continue-chip button.sd-x{background:transparent;opacity:.65;padding:7px 10px}',
     // Tool cards in the chat: the spinner stops once the call is over.
     '.bds-mcp-loading.sd-done,.bds-mcp-loading.sd-stopped{animation:none!important}',
     '.bds-mcp-loading.sd-done{border-left-color:#22c55e!important}',
@@ -1216,6 +1344,12 @@
     installResumeListeners();
     installScrollGuard();
     watchReplies();
+    // A reload mid-task leaves the run-once gate stalled; after the page has
+    // settled, offer the user a way forward instead of staying silent.
+    // (unref exists only in node's timers; the page's setTimeout returns a
+    // number, so this stays a no-op in the app.)
+    var settle = setTimeout(function () { maybeOfferContinue(); }, 9000);
+    if (settle && typeof settle.unref === 'function') settle.unref();
     // A fresh page has no running loop (clears a flag left by a reload/crash).
     try { var b = bridge(); if (b && typeof b.sandboxAgentActive === 'function') b.sandboxAgentActive(false); } catch (_) {}
     if (document.body) { watchSheet(); watchCards(); }
@@ -1247,6 +1381,10 @@
     _sweepCards: sweepCards,
     _looksUnfinished: looksUnfinished,
     _nudgeFor: nudgeFor,
+    _lastTaskStall: lastTaskStall,
+    _continueBody: continueBody,
+    _maybeOfferContinue: maybeOfferContinue,
+    _continueKind: function () { return continueKind; },
     _promptContext: promptContext,
     _statusText: statusText,
     _statusShort: statusShort,
