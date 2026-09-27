@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - v3-real-exact-ui
+      - qa/real-world-testing
       - arena/01a0cebd-deepseek
       - arena/01a0dc4d-deepseek
     tags:
@@ -12,6 +13,7 @@ on:
   pull_request:
     branches:
       - main
+      - qa/real-world-testing
   workflow_dispatch:
     inputs:
       publish:
@@ -205,6 +207,98 @@ jobs:
           chmod +x ./gradlew
           ./gradlew --no-daemon lintDebug -Dorg.gradle.jvmargs=-Xmx3g 2>&1 | tee /tmp/gradle-lint.log || true
           python3 ../scripts/ci_annotate_lint.py app/build/reports/lint-results-debug.xml /tmp/gradle-lint.log
+
+  harness:
+    # Layer 2: the real engine bundle in a real Chromium against the chat
+    # fixture (tools/harness/). Report-only until the job proves stable;
+    # screenshots + report.json are uploaded as artifacts, never committed.
+    name: Engine harness (report only)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install NPM Dependencies
+        run: npm ci
+      - name: Real-engine harness scenarios
+        run: npm run test:harness
+        env:
+          PUPPETEER_EXECUTABLE_PATH: /usr/bin/google-chrome
+      - name: Upload harness report and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-report
+          path: tools/harness/artifacts
+          if-no-files-found: ignore
+          retention-days: 14
+
+  emulator:
+    # Layer 3: real Android boots of the debug APK (API 30/34/35). Report-only
+    # until the job proves stable; screenshots + logcat are artifacts.
+    name: Emulator smoke (API ${{ matrix.api-level }})
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: [30, 34, 35]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle*
+            android/**/gradle-wrapper.properties
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools platforms;android-34 build-tools;34.0.0
+      - name: Write Android local.properties
+        run: printf 'sdk.dir=%s\n' "$ANDROID_HOME" > android/local.properties
+      - name: Install NPM Dependencies
+        run: npm ci
+      - name: Stage Super DeepSeek engine assets
+        run: |
+          mkdir -p android/app/src/main/assets
+          rm -rf android/app/src/main/assets/bds
+          cp -r android/app/src/main/bds-assets/bds android/app/src/main/assets/bds
+      - name: Build debug APK
+        working-directory: android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon assembleDebug -Dorg.gradle.jvmargs=-Xmx3g
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Boot emulator and smoke-test the app
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash android/ci/emulator-smoke.sh
+      - name: Upload smoke screenshots and logcat
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-smoke-api-${{ matrix.api-level }}
+          path: /tmp/emulator-smoke
+          if-no-files-found: ignore
+          retention-days: 14
 
   release:
     name: Publish Release
