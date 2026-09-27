@@ -5,8 +5,7 @@ on:
     branches:
       - main
       - v3-real-exact-ui
-      - arena/01a0cebd-deepseek
-      - arena/01a0dc4d-deepseek
+      - arena/**
     tags:
       - "v*"
   pull_request:
@@ -205,6 +204,76 @@ jobs:
           chmod +x ./gradlew
           ./gradlew --no-daemon lintDebug -Dorg.gradle.jvmargs=-Xmx3g 2>&1 | tee /tmp/gradle-lint.log || true
           python3 ../scripts/ci_annotate_lint.py app/build/reports/lint-results-debug.xml /tmp/gradle-lint.log
+
+  engine-harness:
+    name: Engine Harness (Layer 2 — Chromium)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install NPM Dependencies
+        run: npm ci
+      - name: Run engine unit tests
+        run: npm run test:engine
+      - name: Run harness dry-run
+        run: |
+          node tools/harness/run.mjs --fixture android/app/src/test/fixtures/deepseek-realistic.html 2>&1 | tee /tmp/harness.log
+          echo "=== harness report ===" && cat /tmp/harness.log
+      - name: Upload harness log
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-log
+          path: /tmp/harness.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+  emulator-tests:
+    name: Emulator Tests (Layer 3 — Android)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle*
+            android/**/gradle-wrapper.properties
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools platforms;android-34 build-tools;34.0.0
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run instrumented tests on emulator (API 34)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          script: |
+            printf 'sdk.dir=%s\n' "$ANDROID_HOME" > android/local.properties
+            chmod +x android/gradlew
+            android/gradlew --no-daemon connectedDebugAndroidTest 2>&1 | tee /tmp/emulator.log
+      - name: Upload emulator logs and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-artifacts
+          path: |
+            /tmp/emulator.log
+            android/app/build/reports/androidTests
+            android/app/build/outputs/androidTest-results
+          if-no-files-found: ignore
+          retention-days: 14
 
   release:
     name: Publish Release

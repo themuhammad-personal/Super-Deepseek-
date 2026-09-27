@@ -1,0 +1,9 @@
+{
+  "name": "sd-harness",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@sparticuz/chromium": "^127.0.0",
+    "puppeteer-core": "^22.0.0"
+  }
+}
