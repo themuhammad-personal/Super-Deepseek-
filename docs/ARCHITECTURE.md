@@ -11,16 +11,23 @@ what DeepSeek ships.
 │ system splash ─▶ BootScreenView (native launch screen, see below)   │
 │                                                                     │
 │ officialWebView ──▶ https://chat.deepseek.com/                      │
-│   onPageFinished ─▶ injectBdsScripts():                             │
+│   onPageStarted/onPageFinished ─▶ MainFrameTracker (main frame only)│
+│        bridge trust (trustedPage) + engine injection gate           │
+│   injectBdsScripts():                                               │
 │        1. injected.js   network hooks (prompt injection, tool tags) │
-│        2. content.css   engine styles  (style#bds-css)              │
+│        2. content.css + our-skin.css  engine styles (style#bds-css) │
 │        3. content.js    engine UI + logic (Svelte)                  │
-│        4. UiPolish      hides out-of-scope features, signals ready  │
+│        4. sd-native.js  bridge fetch wrapper, blobs, MCP glue       │
+│        5. sd-agent.js   Linux-sandbox agent loop (MCP server)       │
+│        6. sd-sheets.js  draggable engine sheets                     │
+│        7. sd-health.js  DOM drift health checks + notice            │
+│        8. UiPolish      hides out-of-scope features, signals ready  │
 │   shouldInterceptRequest ─▶ https://bds-asset.local/bds/* from APK  │
 │                                                                     │
 │ AndroidBridge (WebViewBridge) — JS ⇄ native                         │
 │   storage · file/camera picker · downloads · haptics · MCP fetch    │
-│   locale/theme · update checks (UpdateChecker)                      │
+│   (NetworkGuard: no loopback/private targets) · locale/theme ·      │
+│   update checks (UpdateChecker)                                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -68,8 +75,9 @@ Things inside the bundle that deliberately keep their original names:
 | `StudioPreview.kt` | native | Preview of workspace files at `https://workspace.invalid/<guest path>` (served by `shouldInterceptRequest`, never a real host): folders, HTML with relative assets, Markdown (safe renderer), images, video, audio |
 | `StudioSheet.kt` | native | Studio's bottom sheets: slide up, drag down (or fling, tap outside, Back) to dismiss |
 | `ShellProtocol.kt` | native | Studio terminal ↔ shell: end-of-command markers (exit code, folder), Run/Stop state |
-| `sd-agent.js` | engine | Exposes the sandbox to the engine as MCP server `sandbox`, re-reads exact tool arguments from the chat history, the Stop chip, the "ask" mode, continuity (re-scans a finished reply for missed tool calls and nudges a reply that stopped mid-task, at most twice per user message; switchable), the scroll guard (never pulls a reader who scrolled up back to the bottom), the live sandbox state line in the MCP prompt (`promptContext()` ← `AndroidBridge.sandboxContext()`), and the **Linux & Agent** settings page — its own row on the Advanced settings overview (content.js `sdBuildOverview` → page `linux` → `sdMountLinux` → `__sdAgent.mountSettings`, `#sd-linux-page`; prefs `sd_sandbox_enabled` / `sd_sandbox_mode` / `sd_agent_autocontinue`, shared with Linux Studio; the engine language is mirrored to `sd_ui_locale` so Studio follows it) |
+| `sd-agent.js` | engine | Exposes the sandbox to the engine as MCP server `sandbox`, re-reads exact tool arguments from the chat history, the Stop chip, the "ask" mode, continuity (re-scans a finished reply for missed tool calls and nudges a reply that stopped mid-task, at most twice per user message; switchable; reply-end detection uses the poll edge, a thread-growth stall and `bds:token-usage` so short replies are never missed), the **"Continue task?" chip** when the run-once gate stalls after a reload/crash (a tap sends a budget-free continuation nudge), the scroll guard (never pulls a reader who scrolled up back to the bottom), the live sandbox state line in the MCP prompt (`promptContext()` ← `AndroidBridge.sandboxContext()`), and the **Linux & Agent** settings page — its own row on the Advanced settings overview (content.js `sdBuildOverview` → page `linux` → `sdMountLinux` → `__sdAgent.mountSettings`, `#sd-linux-page`; prefs `sd_sandbox_enabled` / `sd_sandbox_mode` / `sd_agent_autocontinue`, shared with Linux Studio; the engine language is mirrored to `sd_ui_locale` so Studio follows it) |
 | `sd-sheets.js` | engine | The engine's bottom sheets (+ menu, projects, settings drawer) follow the finger: drag down or fling to dismiss |
+| `sd-health.js` | engine | DOM drift guard (risk §4.1): landmark checks every 4 s (composer/message chain, roles, send button); on a drifted page a one-time dismissible notice (EN+BN, `#sd-health-notice`, `sd_health_notice` storage) says chat keeps working while engine extras rest |
 
 The engine does the agent loop itself: the model writes
 `<SDS:AUTO:MCP url="sandbox" tool="run">{…}</SDS:AUTO:MCP>`, the engine calls the tool and
@@ -91,9 +99,15 @@ Typing `/` in the composer opens the command popup.
 
 ## Page lifecycle
 
-The engine is injected on every `onPageFinished` of `chat.deepseek.com`. In-app
-navigation (DeepSeek is a single-page app) keeps the engine alive; a full reload
-re-injects it.
+The engine is injected on every `onPageFinished` of the **main frame** at
+`chat.deepseek.com` — `MainFrameTracker` reads the WebView's own URL so iframe
+navigations (OAuth, hCaptcha) can neither receive the engine nor flip
+`bridge.trustedPage` (which gates storage, files, fetch/MCP and the sandbox).
+In-app navigation (DeepSeek is a single-page app) keeps the engine alive; a full
+reload re-injects it (the agent's run-once gate then offers the Continue-task
+chip instead of silently stalling). Debug builds enable
+`WebView.setWebContentsDebuggingEnabled` for `chrome://inspect`; release builds
+keep it off.
 
 ## Launch screen
 
