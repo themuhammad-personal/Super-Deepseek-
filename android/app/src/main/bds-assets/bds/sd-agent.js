@@ -606,15 +606,68 @@
     flow.timers.push(setTimeout(function () { maybeOfferContinue(); }, NUDGE_AT + 1500));
   }
 
+  // ── Reply-end detection ─────────────────────────────────────────────────────
+  //
+  // The old watcher only acted when the 500 ms poll happened to see the page
+  // generating at one tick and idle at the next. A short agent reply ("Now I
+  // will run the tests:") can stream and finish between two polls, which left
+  // keep-going nudges, the Continue chip and the reprocess timers dead on
+  // arrival. Three signals now cover the gap: the poll edge, a thread-growth
+  // stall check, and injected.js's per-completion bds:token-usage event. Each
+  // reply ends exactly once (signature match, so reprocess or an outgoing
+  // quiet send cannot retrigger it).
+  function threadSig() {
+    try {
+      var all = document.querySelectorAll('.ds-message');
+      if (!all.length) return '0';
+      var last = all[all.length - 1];
+      var md = (last.querySelector && last.querySelector('.ds-markdown')) || last;
+      return all.length + ':' + String(md.textContent || '').length;
+    } catch (_) { return ''; }
+  }
+
+  var lastEndSig = null;
+  function noteReplyEnd(force) {
+    var sig = threadSig();
+    // The poll edge (force) is once-per-generating-window by construction; the
+    // fallback and completion-event paths must additionally see new thread
+    // content so reprocess or an outgoing quiet send cannot retrigger them.
+    if (!force && sig === lastEndSig) return;
+    lastEndSig = sig;
+    onReplyEnd();
+  }
+  function checkReplyEnd() {
+    try { if (!generating()) noteReplyEnd(); } catch (_) {}
+  }
+
   function watchReplies() {
+    var lastSig = threadSig();
+    var lastGrow = 0;
     setInterval(function () {
       syncLocale();
       var g = generating();
       if (g && flow.timers.length) { flow.timers.forEach(clearTimeout); flow.timers = []; }
       if (g) hideContinueChip();
-      if (flow.was && !g) onReplyEnd();
+      if (flow.was && !g) noteReplyEnd(true);
       flow.was = g;
+      // Fallback for replies the poll cannot see: the thread grew and then
+      // went quiet while nothing is generating.
+      var sig = threadSig();
+      if (sig !== lastSig) { lastSig = sig; lastGrow = Date.now(); }
+      else if (!g && lastGrow && Date.now() - lastGrow >= 450 && !flow.timers.length) {
+        lastGrow = 0;
+        noteReplyEnd();
+      }
     }, 500);
+    try {
+      // injected.js fires this when a completion response ends — the most
+      // reliable end-of-reply signal on the real page.
+      window.addEventListener('bds:token-usage', function () {
+        setTimeout(checkReplyEnd, 600);
+        var late = setTimeout(checkReplyEnd, 1800);
+        if (late && typeof late.unref === 'function') late.unref();
+      });
+    } catch (_) {}
   }
 
   // ── Continue task chip ──────────────────────────────────────────────────────
@@ -715,12 +768,15 @@
 
   /** Offer the chip only when the loop is truly idle and the task is stalled. */
   function maybeOfferContinue() {
-    if (window.__sdAgentStopped || state.active || state.pending > 0 || mcpPending) return;
+    // state.active is only a "task seen recently" flag (cleared 10 s after the
+    // last call); a stalled task must still get its chip, so the gate is the
+    // live signals — not the recency flag.
+    if (window.__sdAgentStopped || state.pending > 0 || mcpPending) return;
     if (generating()) return;
     var sid = sessionId();
     if (!sid || !sandboxServers().length) return;
     requestHistory(sid).then(function (messages) {
-      if (!messages || window.__sdAgentStopped || state.active || state.pending > 0 || mcpPending) return;
+      if (!messages || window.__sdAgentStopped || state.pending > 0 || mcpPending) return;
       if (generating()) return;
       var kind = lastTaskStall(messages);
       if (kind) showContinueChip(kind);
@@ -1381,6 +1437,7 @@
     _sweepCards: sweepCards,
     _looksUnfinished: looksUnfinished,
     _nudgeFor: nudgeFor,
+    _noteReplyEnd: noteReplyEnd,
     _lastTaskStall: lastTaskStall,
     _continueBody: continueBody,
     _maybeOfferContinue: maybeOfferContinue,

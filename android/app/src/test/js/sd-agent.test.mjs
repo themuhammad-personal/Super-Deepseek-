@@ -376,6 +376,21 @@ test('continuity: nudges are counted per instruction; tool calls in between neve
   assert.equal(engine.sent.length, 3);
 });
 
+test('continuity: a reply end is scheduled once even when the thread stops changing', async () => {
+  const { win } = load({ history: unfinishedChain, speed: 20 });
+  const engine = fakeEngine(win);
+  let repros = 0;
+  win.__sdEngine.reprocess = () => { repros++; };
+  // The old watcher missed short replies that streamed between two polls; the
+  // fallback ends the reply from thread evidence, but must do so exactly once
+  // (reprocess or an outgoing quiet send must not retrigger the timers).
+  win.__sdAgent._noteReplyEnd();
+  win.__sdAgent._noteReplyEnd();
+  win.__sdAgent._noteReplyEnd();
+  await wait(340);
+  assert.equal(repros, 3, 'exactly one reply-end schedule (REPROCESS_AT has 3 timers)');
+});
+
 test('continuity: no nudge when the agent did no work for the current instruction', async () => {
   const { win } = load({ history: unfinishedChain, speed: 20 });
   const engine = fakeEngine(win);
