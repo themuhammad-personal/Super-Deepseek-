@@ -33,6 +33,8 @@
 
 প্রতিটি ফিক্সের প্রমাণ টেবিলের শেষ কলামে — যেমন বাগ ৬-এ পুরনো কোডে `MainFrameTrustTest` ইচ্ছাকৃতভাবে চালিয়ে ২টি ফেইল দেখা হয়েছে, ফিক্সের পর সবুজ।
 
+**CI স্ট্যাটাস (চূড়ান্ত হেড `c0c443d`)**: সব জব সবুজ — `Build & Verify APK` (পূর্ণ gradle ইউনিট টেস্ট সহ), `Lint`, `Engine harness` (৭ pass / ২ skip), `Emulator smoke` API **৩০, ৩৪, ৩৫** সব সফল; `Publish Release` এই শাখায় সঠিকভাবে skip। স্ক্রিনশট ও লগক্যাট CI আর্টিফ্যাক্টে (কমিটে নয়)।
+
 ## ৩. আপনার ফোনে পরীক্ষার নাম্বারড স্ক্রিপ্ট (মালিকের জন্য)
 
 APK বসিয়ে (CI-এর `super-deepseek-apk` আর্টিফ্যাক্ট বা release), ইন্টারনেটসহ চালু করুন। প্রতিটি ধাপে পাশের ✅/❌ নিন।
@@ -84,6 +86,8 @@ APK বসিয়ে (CI-এর `super-deepseek-apk` আর্টিফ্য�
 | `ad75ab2` | test(harness): Layer-2 হারনেস |
 | `4497666` | fix(bridge): মেইন-ফ্রেম ট্রাস্ট (বাগ ৬) |
 | `5039c79` | ci: harness + emulator job (API 30/34/35) |
-| চূড়ান্ত | chore(qa): রিপোর্ট + মডেল ক্লাসিফায়ার ফিক্স + ডিবাগ ফ্ল্যাগ |
+| `4c03e20` | fix(engine): মডেল ব্যাজ ক্লাসিফায়ার + ডিবাগ WebView ইনস্পেকশন ফ্ল্যাগ |
+| `a0f88c2` | docs(qa): বাংলা রিপোর্ট + প্ল্যান/আর্কিটেকচার sync |
+| `c0c443d` | fix(harness): ডেস্টপ Chrome-এ লঞ্চ ফ্ল্যাগ (CI harness সবুজ) |
 
 সব কমিটের আগে `node scripts/brand-check.mjs` চালানো হয়েছে (clean)। `content.js`-এ সব এডিট asserted single-match replacement + `node --check`। জেনারেটেড আর্টিফ্যাক্ট (স্ক্রিনশট, `node_modules`, jniLibs, sandbox assets) কমিট করা হয়নি।
