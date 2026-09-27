@@ -61,7 +61,15 @@ class WebViewBridgeTest {
             .readTimeout(2, TimeUnit.SECONDS)
             .callTimeout(5, TimeUnit.SECONDS)
             .build()
-        bridge = WebViewBridge(context, client, server.url("").toString().removeSuffix("/"))
+        // MockWebServer lives on 127.0.0.1; these tests exercise the fetch
+        // routing contract itself, so the SSRF policy is replaced with a
+        // permissive one here. WebViewBridgeSsrfTest covers the real policy.
+        bridge = WebViewBridge(
+            context,
+            client,
+            server.url("").toString().removeSuffix("/"),
+            networkPolicy = { null },
+        )
     }
 
     @After

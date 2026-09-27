@@ -314,6 +314,12 @@ class WebViewBridge(
         private val context: Context,
         httpClient: OkHttpClient? = null,
         private val githubApiBaseUrl: String = DEFAULT_GITHUB_API_BASE_URL,
+        /**
+         * SSRF policy for the steerable HTTP paths (web fetch, GitHub zip, MCP):
+         * returns why a URL is blocked, or null when it may be fetched. Tests
+         * that drive a local MockWebServer replace it with a permissive one.
+         */
+        private val networkPolicy: (String) -> String? = { NetworkGuard.blockedUrlReason(it) },
 ) {
 
     private val prefs: SharedPreferences =
@@ -355,6 +361,9 @@ class WebViewBridge(
                             .connectTimeout(20, TimeUnit.SECONDS)
                             .readTimeout(60, TimeUnit.SECONDS)
                             .callTimeout(120, TimeUnit.SECONDS)
+                            // Even if DNS answers change between the pre-flight
+                            // check and the request, no private address is dialed.
+                            .dns(NetworkGuard.FilteringDns())
                             .build()
 
     /** Set by MainActivity to react to page theme changes without leaking the Activity window. */
@@ -1280,6 +1289,13 @@ class WebViewBridge(
             response.put("error", "Expected an http or https URL.")
             return
         }
+        // SSRF: model output must never reach loopback or LAN addresses.
+        networkPolicy(url)?.let { reason ->
+            response.put("ok", false)
+            response.put("blocked", true)
+            response.put("error", "Blocked: $reason is not allowed (local and private network addresses are off-limits).")
+            return
+        }
 
         val options = payload.optJSONObject("options")
         val method = options?.optString("method")?.uppercase()?.ifEmpty { "GET" } ?: "GET"
@@ -1372,13 +1388,17 @@ class WebViewBridge(
         val input = rawUrl.trim()
         if (input.isEmpty()) return null
 
+        // The URL may be embedded in markdown or prose, or arrive bare (with a
+        // bracketed IPv6 host like http://[::1]/). Extraction matches bracket
+        // groups as one unit so an IPv6 literal is never cut at its "]".
+        val urlPattern = """https?://(?:\[[^\]]*\]|[^\s<>"')\]])+"""
         val markdownUrl =
-                Regex("""\[[^\]]*]\(\s*(https?://[^\)\s]+)""", RegexOption.IGNORE_CASE)
+                Regex("""\[[^\]]*]\(\s*($urlPattern)""", RegexOption.IGNORE_CASE)
                         .find(input)
                         ?.groupValues
                         ?.getOrNull(1)
         val inlineUrl =
-                Regex("""https?://[^\s<>"'\)\]]+""", RegexOption.IGNORE_CASE)
+                Regex(urlPattern, RegexOption.IGNORE_CASE)
                         .find(input)
                         ?.value
         val candidate =
@@ -1428,6 +1448,13 @@ class WebViewBridge(
         if (url.isEmpty()) {
             response.put("ok", false)
             response.put("error", "No URL provided.")
+            return
+        }
+        // The URL comes from the engine like a web fetch: same SSRF rules.
+        networkPolicy(url)?.let { reason ->
+            response.put("ok", false)
+            response.put("blocked", true)
+            response.put("error", "Blocked: $reason is not allowed (local and private network addresses are off-limits).")
             return
         }
         val token = payload.optString("token").trim()
@@ -1839,6 +1866,12 @@ class WebViewBridge(
             timeoutSeconds: Long = 30L
     ): McpFetchResult {
         val httpUrl = normalizeHttpUrl(serverUrl) ?: throw IllegalArgumentException("Invalid MCP URL: $serverUrl")
+        // An MCP server URL is steerable like any other bridge fetch: same SSRF
+        // rules. The built-in sandbox MCP never comes through here (see
+        // SandboxTools.isSandboxUrl).
+        networkPolicy(httpUrl)?.let { reason ->
+            throw IllegalArgumentException("Blocked: $reason is not allowed (local and private network addresses are off-limits).")
+        }
 
         val builder = Request.Builder()
                 .url(httpUrl)
