@@ -23,8 +23,9 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
-import java.util.Locale
+import java.net.InetAddress
 import java.nio.charset.Charset
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -301,6 +302,82 @@ private fun fileExtension(filename: String): String =
         filename.substringAfterLast('.', "").lowercase()
 
 /**
+ * Returns true when [host] is a loopback, private, link-local or otherwise
+ * non-routable address that the CORS-free bridge must not fetch. The model
+ * output (possibly steered by a malicious page via prompt injection) can
+ * otherwise make the app request LAN or router URLs. Covers 127/8, 10/8,
+ * 172.16/12, 192.168/16, 169.254/16, 0/8, ::1, fc00::/7 (unique local) and
+ * fe80::/10 (link-local), plus the literal "localhost". DNS names that
+ * resolve to such addresses are also blocked. `workspace.invalid` is the
+ * synthetic host for Studio previews (served via shouldInterceptRequest, never
+ * a real network host) — blocking fetch to it is intentional, preview has its
+ * own path through StudioPreview/StudioActivity.
+ */
+internal fun isPrivateHost(host: String): Boolean {
+    val h = host.lowercase().trim().trimEnd('.')
+    if (h.isEmpty()) return false
+    if (h == "localhost" || h.endsWith(".localhost")) return true
+    if (h == "workspace.invalid" || h.endsWith(".workspace.invalid")) return true
+    // IPv4 literal
+    if (h.matches(Regex("""^\d{1,3}(\.\d{1,3}){3}$"""))) {
+        val parts = h.split(".").mapNotNull { it.toIntOrNull() }
+        if (parts.size == 4 && parts.all { it in 0..255 }) {
+            return when {
+                parts[0] == 0 -> true
+                parts[0] == 127 -> true
+                parts[0] == 10 -> true
+                parts[0] == 192 && parts[1] == 168 -> true
+                parts[0] == 172 && parts[1] in 16..31 -> true
+                parts[0] == 169 && parts[1] == 254 -> true
+                else -> false
+            }
+        }
+        return false
+    }
+    // IPv6 literal (contains colon)
+    if (h.contains(":")) {
+        val clean = h.removePrefix("[").removeSuffix("]").substringBefore("%")
+        return try {
+            val addr = InetAddress.getByName(clean)
+            if (addr.isLoopbackAddress || addr.isSiteLocalAddress || addr.isLinkLocalAddress || addr.isAnyLocalAddress) return true
+            val bytes = addr.address
+            if (bytes.size == 16) {
+                val first = bytes[0].toInt() and 0xFF
+                if (first == 0xFC || first == 0xFD) return true
+            }
+            false
+        } catch (_: Exception) {
+            false
+        }
+    }
+    // Hostname — try DNS resolution; if it resolves to a private address, block.
+    // A failure to resolve is not a block (the fetch will fail naturally).
+    return try {
+        val addr = InetAddress.getByName(h)
+        if (addr.isLoopbackAddress || addr.isSiteLocalAddress || addr.isLinkLocalAddress || addr.isAnyLocalAddress) true
+        else {
+            val bytes = addr.address
+            if (bytes.size == 16) {
+                val first = bytes[0].toInt() and 0xFF
+                first == 0xFC || first == 0xFD
+            } else false
+        }
+    } catch (_: Exception) {
+        false
+    }
+}
+
+internal fun isPrivateNetworkUrl(url: String): Boolean {
+    return try {
+        val uri = java.net.URI(url)
+        val host = uri.host ?: return false
+        isPrivateHost(host)
+    } catch (_: Exception) {
+        false
+    }
+}
+
+/**
  * @JavascriptInterface object exposed to the WebView as `window.AndroidBridge`.
  *
  * It backs the engine injected into chat.deepseek.com: key/value storage (prefs plus
@@ -314,6 +391,8 @@ class WebViewBridge(
         private val context: Context,
         httpClient: OkHttpClient? = null,
         private val githubApiBaseUrl: String = DEFAULT_GITHUB_API_BASE_URL,
+        /** Disable private-network blocking in JVM unit tests that use MockWebServer on 127.0.0.1. */
+        internal var blockPrivateNetworks: Boolean = true,
 ) {
 
     private val prefs: SharedPreferences =
@@ -1281,6 +1360,12 @@ class WebViewBridge(
             return
         }
 
+        if (blockPrivateNetworks && isPrivateNetworkUrl(url)) {
+            response.put("ok", false)
+            response.put("error", "Private network addresses are blocked for security (use the Linux sandbox preview for local servers).")
+            return
+        }
+
         val options = payload.optJSONObject("options")
         val method = options?.optString("method")?.uppercase()?.ifEmpty { "GET" } ?: "GET"
         val headersJson = options?.optJSONObject("headers")
@@ -1429,6 +1514,14 @@ class WebViewBridge(
             response.put("ok", false)
             response.put("error", "No URL provided.")
             return
+        }
+        if (blockPrivateNetworks) {
+            val norm = normalizeHttpUrl(url)
+            if (norm != null && isPrivateNetworkUrl(norm)) {
+                response.put("ok", false)
+                response.put("error", "Private network addresses are blocked for security.")
+                return
+            }
         }
         val token = payload.optString("token").trim()
         val canSendToken = token.isNotEmpty() && isCodeloadHost(url)
@@ -1839,6 +1932,9 @@ class WebViewBridge(
             timeoutSeconds: Long = 30L
     ): McpFetchResult {
         val httpUrl = normalizeHttpUrl(serverUrl) ?: throw IllegalArgumentException("Invalid MCP URL: $serverUrl")
+        if (blockPrivateNetworks && isPrivateNetworkUrl(httpUrl)) {
+            throw IllegalArgumentException("Private network MCP URLs are blocked for security: $httpUrl")
+        }
 
         val builder = Request.Builder()
                 .url(httpUrl)

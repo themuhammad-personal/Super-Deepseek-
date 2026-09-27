@@ -62,6 +62,10 @@ class WebViewBridgeTest {
             .callTimeout(5, TimeUnit.SECONDS)
             .build()
         bridge = WebViewBridge(context, client, server.url("").toString().removeSuffix("/"))
+        // MockWebServer binds to 127.0.0.1; private-network blocking would reject it.
+        // Disable for the existing success-path tests; dedicated private-blocking tests
+        // re-enable it explicitly.
+        bridge.blockPrivateNetworks = false
     }
 
     @After
@@ -625,5 +629,124 @@ class WebViewBridgeTest {
         val result = response.getJSONObject("result")
         val content = result.getJSONArray("content")
         assertEquals("Tool output", content.getJSONObject(0).getString("text"))
+    }
+
+    // ── private-network blocking — security ───────────────────────────────
+
+    @Test
+    fun `isPrivateHost blocks loopback and private ranges`() {
+        assertTrue(isPrivateHost("127.0.0.1"))
+        assertTrue(isPrivateHost("127.10.20.30"))
+        assertTrue(isPrivateHost("10.0.0.1"))
+        assertTrue(isPrivateHost("10.255.255.255"))
+        assertTrue(isPrivateHost("192.168.1.1"))
+        assertTrue(isPrivateHost("172.16.5.4"))
+        assertTrue(isPrivateHost("172.31.255.255"))
+        assertTrue(isPrivateHost("169.254.10.20"))
+        assertTrue(isPrivateHost("0.0.0.1"))
+        assertTrue(isPrivateHost("localhost"))
+        assertTrue(isPrivateHost("LOCALHOST"))
+        assertTrue(isPrivateHost("::1"))
+        assertTrue(isPrivateHost("fc00::1"))
+        assertTrue(isPrivateHost("fd00::1"))
+        assertTrue(isPrivateHost("fe80::1"))
+        assertTrue(isPrivateHost("workspace.invalid"))
+    }
+
+    @Test
+    fun `isPrivateHost allows public hosts`() {
+        assertFalse(isPrivateHost("8.8.8.8"))
+        assertFalse(isPrivateHost("1.1.1.1"))
+        assertFalse(isPrivateHost("93.184.216.34"))
+        assertFalse(isPrivateHost("142.250.0.0"))
+        assertFalse(isPrivateHost("chat.deepseek.com"))
+        assertFalse(isPrivateHost("example.com"))
+        assertFalse(isPrivateHost("api.github.com"))
+        // 172.32.x.x is public (just outside 172.16/12)
+        assertFalse(isPrivateHost("172.32.0.1"))
+        assertFalse(isPrivateHost("172.15.255.255"))
+    }
+
+    @Test
+    fun `isPrivateNetworkUrl blocks private URLs`() {
+        assertTrue(isPrivateNetworkUrl("http://127.0.0.1:8080/"))
+        assertTrue(isPrivateNetworkUrl("https://192.168.1.5/admin"))
+        assertTrue(isPrivateNetworkUrl("http://10.0.0.5:3000/"))
+        assertTrue(isPrivateNetworkUrl("http://[::1]/"))
+        assertTrue(isPrivateNetworkUrl("http://localhost:3000/"))
+        assertTrue(isPrivateNetworkUrl("http://workspace.invalid/preview"))
+        assertFalse(isPrivateNetworkUrl("https://chat.deepseek.com/"))
+        assertFalse(isPrivateNetworkUrl("https://example.com/page"))
+    }
+
+    @Test
+    fun `fetch blocks private network URLs`() {
+        bridge.blockPrivateNetworks = true
+        val payload = JSONObject().apply {
+            put("type", "bds-fetch-url")
+            put("url", "http://127.0.0.1:8080/secret")
+        }
+        val response = JSONObject(bridge.fetch(payload.toString()))
+        assertFalse(response.getBoolean("ok"))
+        assertTrue(response.getString("error").contains("Private network"))
+        // No request should have reached the MockWebServer
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun `fetch blocks 192_168 URLs with helpful message`() {
+        bridge.blockPrivateNetworks = true
+        val payload = JSONObject().apply {
+            put("type", "bds-fetch-url")
+            put("url", "http://192.168.0.1/admin")
+        }
+        val response = JSONObject(bridge.fetch(payload.toString()))
+        assertFalse(response.getBoolean("ok"))
+        assertTrue(response.getString("error").contains("Private"))
+    }
+
+    @Test
+    fun `fetch allows public URL when blocking is enabled`() {
+        bridge.blockPrivateNetworks = true
+        // Re-enable is not enough for MockWebServer (still loopback), so use a
+        // public URL but with mocked client that would succeed — we test the
+        // guard only allows it through, not the network itself. The simplest is
+        // to disable blocking for this test, but we verify the guard does not
+        // block public hosts by checking isPrivateNetworkUrl directly.
+        assertFalse(isPrivateNetworkUrl(server.url("/public").toString().replace("127.0.0.1", "93.184.216.34")))
+        // Verify that a public-like URL is not blocked (we disable blocking to actually fetch)
+        bridge.blockPrivateNetworks = false
+        server.enqueue(MockResponse().setBody("ok").setResponseCode(200))
+        val payload = JSONObject().apply {
+            put("type", "bds-fetch-url")
+            put("url", server.url("/public-allowed").toString())
+        }
+        val response = JSONObject(bridge.fetch(payload.toString()))
+        assertTrue(response.getBoolean("ok"))
+    }
+
+    @Test
+    fun `github zip blocks private URLs`() {
+        bridge.blockPrivateNetworks = true
+        val payload = JSONObject().apply {
+            put("type", "bds-fetch-github-zip")
+            put("url", "http://127.0.0.1/evil.zip")
+        }
+        val response = JSONObject(bridge.fetch(payload.toString()))
+        assertFalse(response.getBoolean("ok"))
+        assertTrue(response.getString("error").contains("Private"))
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun `mcp fetch blocks private URLs`() {
+        bridge.blockPrivateNetworks = true
+        val payload = JSONObject().apply {
+            put("type", "bds-mcp-list-tools")
+            put("serverUrl", "http://192.168.1.10:8000/mcp")
+        }
+        val response = JSONObject(bridge.fetch(payload.toString()))
+        assertFalse(response.getBoolean("ok"))
+        assertTrue(response.getString("error").contains("Private"))
     }
 }
