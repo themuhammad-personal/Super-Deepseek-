@@ -67,6 +67,17 @@ internal class NativeBlobStore(
         entries.remove(token)
     }
 
+    /**
+     * Discard every short-lived file and bridge reply.
+     *
+     * Blob paths are capability URLs, so they must not outlive the trusted
+     * chat document that received them. This is also important for memory:
+     * a user can navigate away before a provider-backed stream expires.
+     */
+    fun clear() {
+        entries.clear()
+    }
+
     fun size(): Int = entries.size
 
     fun purgeExpired() {
@@ -88,7 +99,6 @@ internal class NativeBlobStore(
         val headers =
                 mutableMapOf(
                         "Cache-Control" to "no-store",
-                        "Access-Control-Allow-Origin" to "*",
                         "X-SD-Name" to asciiHeader(entry.name),
                 )
         if (entry.size >= 0) headers["X-SD-Size"] = entry.size.toString()
@@ -101,7 +111,7 @@ internal class NativeBlobStore(
                     "utf-8",
                     404,
                     "Not Found",
-                    mapOf("Cache-Control" to "no-store", "Access-Control-Allow-Origin" to "*"),
+                    mapOf("Cache-Control" to "no-store"),
                     ByteArrayInputStream(ByteArray(0)),
             )
 

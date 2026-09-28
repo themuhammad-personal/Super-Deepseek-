@@ -25,6 +25,7 @@ class NativeBlobStoreTest {
         assertEquals(200, response!!.statusCode)
         assertEquals("text/plain", response.mimeType)
         assertEquals("no-store", response.responseHeaders["Cache-Control"])
+        assertNull("Blob responses are same-origin only", response.responseHeaders["Access-Control-Allow-Origin"])
         assertEquals("5", response.responseHeaders["X-SD-Size"])
         assertEquals("a%20b.txt", response.responseHeaders["X-SD-Name"])
         assertEquals("hello", response.data.readBytes().toString(Charsets.UTF_8))
@@ -60,6 +61,19 @@ class NativeBlobStoreTest {
         now += 100
         assertNull(store.lookup(token))
         assertEquals(404, store.serve(NativeBlobStore.PATH_PREFIX + token)!!.statusCode)
+    }
+
+    @Test
+    fun `clear revokes every pending capability URL`() {
+        val store = NativeBlobStore()
+        val regular = store.registerBytes("picked.txt", "text/plain", "hello".toByteArray())
+        val oneShot = store.registerBytes("reply.json", "application/json", "{}".toByteArray(), oneShot = true)
+
+        store.clear()
+
+        assertEquals(0, store.size())
+        assertEquals(404, store.serve(NativeBlobStore.PATH_PREFIX + regular)!!.statusCode)
+        assertEquals(404, store.serve(NativeBlobStore.PATH_PREFIX + oneShot)!!.statusCode)
     }
 
     @Test

@@ -511,6 +511,10 @@ class MainActivity : ComponentActivity() {
                 androidx.webkit.ServiceWorkerControllerCompat.getInstance().setServiceWorkerClient(
                     object : androidx.webkit.ServiceWorkerClientCompat() {
                         override fun shouldInterceptRequest(request: WebResourceRequest): WebResourceResponse? {
+                            // A capability URL belongs to the real chat origin only.
+                            // Never let an unrelated service worker claim a blob just
+                            // because it uses the same path.
+                            if (request.url?.host != DS_HOST) return null
                             val path = request.url?.path ?: return null
                             return if (path.startsWith(NativeBlobStore.PATH_PREFIX)) blobs.serve(path) else null
                         }
@@ -555,7 +559,7 @@ class MainActivity : ComponentActivity() {
                     val url = request.url
                     // Picked/shared files and large bridge replies, streamed (NativeBlobStore).
                     if (url.path?.startsWith(NativeBlobStore.PATH_PREFIX) == true &&
-                        (url.host == DS_HOST || url.host == bdsAssetHost)) {
+                        url.host == DS_HOST) {
                         return bridge.blobs.serve(url.path)
                     }
                     if (url.host == bdsAssetHost) {
@@ -587,6 +591,12 @@ class MainActivity : ComponentActivity() {
                     // also land here on some WebView versions; only the main
                     // frame's URL decides (MainFrameTracker).
                     bridge.trustedPage = MainFrameTracker.trustedForPage(url, view.url)
+                    if (!bridge.trustedPage) {
+                        // Picked files and async bridge replies are scoped to the
+                        // trusted chat document. Drop their opaque URLs before a
+                        // foreign top-level page can exist in this WebView.
+                        bridge.blobs.clear()
+                    }
                 }
                 override fun onPageFinished(view: WebView, url: String?) {
                     super.onPageFinished(view, url)
