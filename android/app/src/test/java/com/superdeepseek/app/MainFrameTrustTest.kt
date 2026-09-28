@@ -71,10 +71,12 @@ class MainFrameTrustTest {
         webView.loadUrl("https://chat.deepseek.com/a/chat/s/abc")
         webView.webViewClient.onPageStarted(webView, "https://chat.deepseek.com/a/chat/s/abc", null)
         assertTrue(bridge.trustedPage)
+        val token = bridge.blobs.registerBytes("picked.txt", "text/plain", "private".toByteArray())
 
         webView.loadUrl("https://evil.example.com/portal")
         webView.webViewClient.onPageStarted(webView, "https://evil.example.com/portal", null)
         assertFalse("a real redirect to a foreign page must revoke the bridge", bridge.trustedPage)
+        assertTrue("navigating away must revoke pending file URLs", bridge.blobs.lookup(token) == null)
     }
 
     @Test
