@@ -28,7 +28,9 @@
   var MAX_PARTS = 12;
   var MAX_INPUT = 100 * 1024 * 1024; // same ceiling as the native picker
   var ZIP_TEXT_BUDGET = 6000000;     // chars of inner files read from one archive
-  var ZIP_ENTRY_MAX = 4 * 1024 * 1024;
+  var ZIP_ENTRY_MAX = 4 * 1024 * 1024;   // inner file of a generic archive (unpacked)
+  var DOC_PART_MAX = 32 * 1024 * 1024;   // one XML part of docx/xlsx/pptx/odt/epub (unpacked)
+  var TEXT_READ_MAX = 24 * 1024 * 1024;  // bytes of a plain/binary file read at all (12 parts × 1.5 M chars ≈ 18 MB)
   var AV_EXT = /\.(mp3|wav|m4a|aac|ogg|oga|opus|flac|wma|amr|aiff?|mid|midi|ape|mka|mp4|m4v|mov|avi|mkv|webm|wmv|flv|3gp|3g2|mpeg|mpg|mts|m2ts|vob|ogv)$/i;
   var IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|heic|heif|avif|tiff?|ico|svg)$/i;
   var ARCHIVE_EXT = /\.(zip|jar|war|apk|aab|xpi|crx|ipa|nupkg|whl|sketch|xd|kmz|cbz|vsix|mcpack)$/i;
@@ -116,18 +118,38 @@
     }
     return out;
   }
-  function inflateRaw(data) {
+  // Streams the inflate and stops at `max` unpacked bytes. The sizes an archive
+  // declares are not trusted: a zip bomb lies about them, and an unbounded
+  // inflate would take the whole WebView (and the chat) down with it.
+  function inflateRaw(data, max) {
     if (typeof DecompressionStream !== 'function') return Promise.reject(new Error('this WebView cannot unzip'));
-    var ds = new DecompressionStream('deflate-raw');
-    var stream = new Blob([data]).stream().pipeThrough(ds);
-    return new Response(stream).arrayBuffer().then(function (ab) { return new Uint8Array(ab); });
+    var reader = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader();
+    var chunks = [], total = 0;
+    function pump() {
+      return reader.read().then(function (r) {
+        if (r.done) {
+          var out = new Uint8Array(total), o = 0;
+          chunks.forEach(function (c) { out.set(c, o); o += c.length; });
+          return out;
+        }
+        total += r.value.length;
+        if (total > max) {
+          try { reader.cancel(); } catch (_) {}
+          throw new Error('too large when unpacked');
+        }
+        chunks.push(r.value);
+        return pump();
+      });
+    }
+    return pump();
   }
-  function zipRead(b, e) {
+  function zipRead(b, e, max) {
     if (u32(b, e.local) !== 0x04034b50) return Promise.reject(new Error('bad zip entry'));
     var start = e.local + 30 + u16(b, e.local + 26) + u16(b, e.local + 28);
     var data = b.subarray(start, start + e.csize);
-    if (e.method === 0) return Promise.resolve(data);
-    if (e.method === 8) return inflateRaw(data);
+    max = max || DOC_PART_MAX;
+    if (e.method === 0) return data.length > max ? Promise.reject(new Error('too large')) : Promise.resolve(data);
+    if (e.method === 8) return inflateRaw(data, max);
     return Promise.reject(new Error('compression method ' + e.method));
   }
   function zipTextOf(b, entries, name) {
@@ -225,7 +247,7 @@
     return queue.reduce(function (p, e) {
       return p.then(function () {
         if (budget <= 0) { skipped++; return; }
-        return zipRead(b, e).then(function (bytes) {
+        return zipRead(b, e, ZIP_ENTRY_MAX).then(function (bytes) {
           if (!looksText(bytes)) return;
           var s = decode(bytes); if (s.length > budget) { s = s.slice(0, budget) + '\n… (truncated)'; }
           budget -= s.length;
@@ -278,9 +300,36 @@
   }
 
   /** file → { text, kind } describing the file in plain text. */
+  function readBytes(file) {
+    // Archives need their central directory at the end, so they are read whole
+    // (≤ 100 MB). Anything else only needs as much text as can be uploaded.
+    if (file.size <= TEXT_READ_MAX) return file.arrayBuffer().then(function (ab) { return { b: new Uint8Array(ab), cut: false }; });
+    return file.slice(0, 8).arrayBuffer().then(function (h) {
+      if (isZip(new Uint8Array(h))) return file.arrayBuffer().then(function (ab) { return { b: new Uint8Array(ab), cut: false }; });
+      return file.slice(0, TEXT_READ_MAX).arrayBuffer().then(function (ab) { return { b: new Uint8Array(ab), cut: true }; });
+    });
+  }
+  function utf16(b) {
+    if (b.length >= 2 && b[0] === 0xff && b[1] === 0xfe) return 'utf-16le';
+    if (b.length >= 2 && b[0] === 0xfe && b[1] === 0xff) return 'utf-16be';
+    return '';
+  }
   function extract(file) {
-    return file.arrayBuffer().then(function (ab) {
-      var b = new Uint8Array(ab), ext = extOf(file.name);
+    return readBytes(file).then(function (rb) {
+      return extractBytes(file, rb.b).then(function (r) {
+        if (rb.cut && r.text) r.text += '\n\n[' + t('Only the first ' + fmtSize(TEXT_READ_MAX) + ' of this ' + fmtSize(file.size) + ' file was read.', 'এই ' + fmtSize(file.size) + ' ফাইলের শুধু প্রথম ' + fmtSize(TEXT_READ_MAX) + ' পড়া হয়েছে।') + ']';
+        return r;
+      });
+    });
+  }
+  function extractBytes(file, b) {
+    return Promise.resolve().then(function () {
+      var ext = extOf(file.name), wide = utf16(b);
+      if (wide) {
+        var w = '';
+        try { w = new TextDecoder(wide).decode(b.subarray(2)); } catch (_) {}
+        if (w) return { text: w, kind: 'text' };
+      }
       if (isZip(b)) {
         var en = zipEntries(b), has = function (n) { return en.some(function (e) { return e.name === n; }); };
         if (has('word/document.xml')) return docx(b, en).then(function (s) { return { text: s, kind: 'Word document' }; });

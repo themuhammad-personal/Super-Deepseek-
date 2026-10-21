@@ -18,6 +18,7 @@ import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.`when`
 import org.mockito.kotlin.any
+import org.mockito.kotlin.anyOrNull
 import org.mockito.kotlin.eq
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -625,5 +626,29 @@ class WebViewBridgeTest {
         val result = response.getJSONObject("result")
         val content = result.getJSONArray("content")
         assertEquals("Tool output", content.getJSONObject(0).getString("text"))
+    }
+
+    @Test
+    fun `mcp app resources still open after a restart for servers the page used before`() {
+        val known = server.url("/mcp-known").toString()
+        `when`(prefs.getStringSet(eq(WebViewBridge.KEY_KNOWN_MCP_SERVERS), anyOrNull())).thenReturn(setOf(known))
+        val client = OkHttpClient.Builder().callTimeout(5, TimeUnit.SECONDS).build()
+        val restarted = WebViewBridge(context, client, server.url("").toString().removeSuffix("/"))
+        server.enqueue(MockResponse().setResponseCode(200).setHeader("Content-Type", "application/json")
+            .setBody("""{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18"}}"""))
+        server.enqueue(MockResponse().setResponseCode(202))
+        server.enqueue(MockResponse().setResponseCode(200).setHeader("Content-Type", "application/json")
+            .setBody("""{"jsonrpc":"2.0","id":2,"result":{"contents":[{"uri":"ui://app/v1.html","mimeType":"text/html;profile=mcp-app","text":"<p>ok</p>"}]}}"""))
+        val ok = JSONObject(restarted.fetch(JSONObject().apply {
+            put("type", "bds-mcp-read-resource"); put("serverUrl", known); put("resourceUri", "ui://app/v1.html")
+        }.toString()))
+        assertFalse(ok.optString("error").contains("Unknown MCP server"))
+
+        // A URL the page never used (e.g. written by a model) is still refused.
+        val refused = JSONObject(restarted.fetch(JSONObject().apply {
+            put("type", "bds-mcp-read-resource"); put("serverUrl", server.url("/never-used").toString()); put("resourceUri", "ui://x/y.html")
+        }.toString()))
+        assertFalse(refused.getBoolean("ok"))
+        assertTrue(refused.getString("error").contains("Unknown MCP server"))
     }
 }

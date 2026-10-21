@@ -267,7 +267,7 @@
           try { Object.defineProperty(r, 'url', { value: d.url || url }); } catch (e) {}
           res(r);
         };
-        post({ type: 'fetch', id: id, url: url, method: String(init.method || 'GET').toUpperCase(), headers: headers, body: body == null ? '' : String(body).slice(0, 262144) });
+        post({ type: 'fetch', id: id, url: url, method: String(init.method || (input && typeof input === 'object' && input.method) || 'GET').toUpperCase(), headers: headers, body: body == null ? '' : String(body).slice(0, 262144) });
       });
     }
     function sdImage(url) {
@@ -476,7 +476,10 @@
         if (v === 'once') st.once[host] = true;
         var bridge = root.__sdBridgeFetch;
         if (typeof bridge !== 'function') { reply(ctrl, d, { error: 'Web access is unavailable here' }); return; }
-        st.times.push(Date.now()); st.active++;
+        // Checked again here: requests that queued up behind a consent sheet must not all fire at once.
+        var t2 = Date.now(); st.times = st.times.filter(function (x) { return t2 - x < 60000; });
+        if (st.times.length >= 60 || st.active >= 6) { reply(ctrl, d, { error: 'Too many requests from this visual' }); return; }
+        st.times.push(t2); st.active++;
         var Ho = root.__sdGenUIHost, lid = Ho && Ho.ledger && Ho.ledger.record({ type: 'fetch', title: host, detail: method + ' ' + u.pathname.slice(0, 80), state: 'running' });
         Promise.resolve(bridge({ type: 'bds-frame-fetch', url: u.href, method: method, headers: d.headers && typeof d.headers === 'object' ? d.headers : {}, body: typeof d.body === 'string' ? d.body : '' }))
           .then(function (r) { r = r || {}; if (Ho && lid) Ho.ledger.update(lid, { state: r.ok ? 'done' : 'failed', endedAt: Date.now() }); reply(ctrl, d, r); },

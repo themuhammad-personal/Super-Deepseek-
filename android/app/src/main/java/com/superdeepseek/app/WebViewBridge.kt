@@ -1887,8 +1887,22 @@ class WebViewBridge(
     private val mcpReqId = java.util.concurrent.atomic.AtomicInteger(100)
 
     /** Servers the trusted page itself has used (its own MCP settings). MCP Apps
-     * resources are only read from these, never from a URL a model wrote. */
-    private val knownMcpServers: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+     * resources are only read from these, never from a URL a model wrote. The set is
+     * persisted (URLs only, no keys) so an MCP app in an old chat still opens after the
+     * app was restarted, before the page has listed that server's tools again. */
+    private val knownMcpServers: MutableSet<String> =
+            java.util.concurrent.ConcurrentHashMap.newKeySet<String>().apply {
+                runCatching { prefs.getStringSet(KEY_KNOWN_MCP_SERVERS, null)?.let { addAll(it) } }
+            }
+
+    private fun markMcpServerKnown(serverUrl: String) {
+        if (SandboxTools.isSandboxUrl(serverUrl)) return
+        if (!serverUrl.startsWith("https://") && !serverUrl.startsWith("http://")) return
+        if (!knownMcpServers.add(serverUrl)) return
+        runCatching {
+            prefs.edit().putStringSet(KEY_KNOWN_MCP_SERVERS, HashSet(knownMcpServers.take(MAX_KNOWN_MCP_SERVERS))).apply()
+        }
+    }
 
     /** The page's explicit key, else the key remembered natively for this exact server. */
     private fun mcpKeyFrom(payload: JSONObject, serverUrl: String): String =
@@ -1903,7 +1917,7 @@ class WebViewBridge(
             return
         }
         val apiKey = mcpKeyFrom(payload, serverUrl)
-        knownMcpServers.add(serverUrl)
+        markMcpServerKnown(serverUrl)
         if (apiKey.isNotEmpty()) rememberMcpKey(serverUrl, apiKey)
         if (SandboxTools.isSandboxUrl(serverUrl)) {
             handleSandboxListTools(response)
@@ -1936,7 +1950,7 @@ class WebViewBridge(
             return
         }
         val apiKey = mcpKeyFrom(payload, serverUrl)
-        knownMcpServers.add(serverUrl)
+        markMcpServerKnown(serverUrl)
         if (apiKey.isNotEmpty()) rememberMcpKey(serverUrl, apiKey)
         if (SandboxTools.isSandboxUrl(serverUrl)) {
             handleSandboxCall(toolName, args, response)
@@ -2265,6 +2279,8 @@ class WebViewBridge(
         // Shared with UpdateChecker, which keeps the update channel and the dismissed-build
         // digest alongside the JS storage keys.
         internal const val PREFS_NAME = "bds_storage"
+        internal const val KEY_KNOWN_MCP_SERVERS = "sd_known_mcp_servers_v1"
+        private const val MAX_KNOWN_MCP_SERVERS = 64
         private const val UNTRUSTED_REPLY = "{\"ok\":false,\"error\":\"Not available on this page.\"}"
         private const val LEGACY_TOKEN_KEY = "ds_official_token"
         private const val UNTRUSTED_SANDBOX_INFO = "{\"supported\":false,\"enabled\":false}"

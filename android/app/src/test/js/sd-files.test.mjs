@@ -140,3 +140,38 @@ test('a capture-phase change listener is installed on the document', () => {
   const { listeners } = load();
   assert.ok(listeners.some(([type, , capture]) => type === 'change' && capture === true));
 });
+
+test('zip bombs are stopped while inflating: the declared size is not trusted', async () => {
+  const { F } = load('.pdf');
+  // 40 MB of zeros deflates to ~40 KB. The central directory is rewritten to claim 100 bytes.
+  const bomb = Buffer.alloc(40 * 1024 * 1024);
+  const z = zip({ 'notes.txt': bomb, 'readme.md': '# hello' });
+  const cdir = z.lastIndexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]), z.length - 22);
+  let p = z.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+  for (; p >= 0 && p <= cdir; p = z.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]), p + 4)) z.writeUInt32LE(100, p + 24);
+  const r = await F.extract(new File([z], 'bomb.zip'));
+  assert.match(r.text, /# hello/, 'the honest file is still read');
+  assert.doesNotMatch(r.text, /## File: notes\.txt/, 'the bomb is skipped, not unpacked');
+  assert.match(r.text, /inner files not included/);
+  // A docx whose document.xml unpacks past the per-part cap fails cleanly instead of exhausting memory.
+  const fat = zip({ 'word/document.xml': Buffer.alloc(33 * 1024 * 1024, 0x20) });
+  await assert.rejects(F.extract(new File([fat], 'fat.docx')), /too large when unpacked/);
+});
+
+test('very large text files: only the first 24 MB is read, with a note', async () => {
+  const { F } = load('.pdf');
+  const line = 'log line 0123456789 abcdefghijklmnopqrstuvwxyz\n';
+  const big = new File([line.repeat(Math.ceil((26 * 1024 * 1024) / line.length))], 'server.log');
+  const r = await F.extract(big);
+  assert.equal(r.kind, 'text');
+  assert.ok(r.text.length <= 24 * 1024 * 1024 + 400, 'bounded read');
+  assert.match(r.text, /Only the first 24\.0 MB of this 26\.0 MB file was read/);
+});
+
+test('UTF-16 text files (Windows Notepad) are read as text, not as binary strings', async () => {
+  const { F } = load('.pdf');
+  const le = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('Hello দুনিয়া\r\nline 2', 'utf16le')]);
+  const r = await F.extract(new File([le], 'notes.ini'));
+  assert.equal(r.kind, 'text');
+  assert.match(r.text, /Hello দুনিয়া/);
+});
