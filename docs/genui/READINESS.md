@@ -101,11 +101,17 @@ in `qa/genui/`):
 
 ## Release
 
-* Same signing key as 2.50/2.60, so it **updates 2.60.x in place**.
-  versionCode base: `2_700_000 + CI run number`.
-* Local release build (2026-10-21): `super-deepseek-2.70.0.apk`, 8,461,056 bytes,
-  versionName `2.70.0`, versionCode `2700000` (local build id 0), `apksigner verify` OK,
-  signer certificate SHA-256 `75:eb:ff:1c:a3:3e:27:e8:f1:4d:98:12:2d:c5:e6:db:81:1a:1c:77:f3:71:33:b7:bb:bd:24:cd:75:ba:38:03`
-  (same as 2.50/2.60). Packaged engine checked with `unzip -p` (`assets/bds/sd-files.js`,
-  `sd-genui-frame.js` with the web-access runtime, content.js upload text).
-* APK SHA-256 `cad600211f75ff103fa031363455b4fa966fc06a8a07ecea7fee2af3b6454427`.
+* Same signing key as 2.50/2.60/2.70.0, so it **updates those builds in place**
+  (logins and settings stay). versionCode: `2_701_000 + CI run number`.
+* **2.70.1 = GitHub Actions Continuous Build #8** (commit `0cf4eba`, release tag
+  `latest`): `super-deepseek-latest.apk`, 8,470,852 bytes, versionName `2.70.1`,
+  versionCode `2701008`, APK Signature Scheme v2 verified, signer certificate SHA-256
+  `75:eb:ff:1c:a3:3e:27:e8:f1:4d:98:12:2d:c5:e6:db:81:1a:1c:77:f3:71:33:b7:bb:bd:24:cd:75:ba:38:03`.
+  APK SHA-256 `8b5b63f2919ab06fcdb2850ce4905a6dc1d58c833f1173ccb5f89dd83ab4ce92`
+  (matches the digest GitHub reports). Packaged `assets/bds/sd-files.js` and
+  `sd-genui-frame.js` are byte-identical to the source; the viewer strings are in the
+  resource table (en, bn, fa, ru, tr, zh-CN).
+* In CI for that build: JS 159/159, acceptance 21/21, Kotlin unit tests passed,
+  lint report only (`OldTargetApi`, 11 newer-dependency notices; `SetTextI18n` fixed).
+* Updating from 2.70.0 needs one manual install: 2.70.0 checked the old repository
+  and could not read a version from the `latest` tag. 2.70.1 onwards updates itself.
