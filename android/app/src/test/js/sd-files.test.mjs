@@ -16,7 +16,8 @@ function load(accept) {
     TextDecoder, Blob, File, Response, DecompressionStream, Uint8Array, Promise, console,
     document: { documentElement: { lang: 'en' }, addEventListener: (t, f, c) => listeners.push([t, f, c]) },
     navigator: { language: 'en' },
-    __sdNative: { _acceptsFile: (acc, f) => (acc || '').split(',').map((s) => s.trim()).filter(Boolean).some((a) => f.name.toLowerCase().endsWith(a)) },
+    // Same contract as sd-native's acceptsFile: an empty list accepts everything.
+    __sdNative: { _acceptsFile: (acc, f) => { const l = (acc || '').split(',').map((s) => s.trim()).filter(Boolean); return !l.length || l.some((a) => f.name.toLowerCase().endsWith(a)); } },
   };
   win.window = win;
   vm.createContext(win);
@@ -174,4 +175,24 @@ test('UTF-16 text files (Windows Notepad) are read as text, not as binary string
   const r = await F.extract(new File([le], 'notes.ini'));
   assert.equal(r.kind, 'text');
   assert.match(r.text, /Hello দুনিয়া/);
+});
+
+test('an empty accept on the chat upload falls back to the formats DeepSeek takes; other inputs keep "accept everything"', async () => {
+  const { F } = load();
+  const chat = { accept: '', multiple: true, hasAttribute: () => false };
+  const folder = { accept: '', multiple: true, hasAttribute: (n) => n === 'webkitdirectory' };
+  const single = { accept: '', multiple: false, hasAttribute: () => false };
+  assert.match(F._acceptOf(chat), /\.pdf/);
+  assert.equal(F._acceptOf(folder), '');
+  assert.equal(F._acceptOf(single), '');
+  assert.equal(F._acceptOf({ accept: '.json', multiple: true, hasAttribute: () => false }), '.json');
+  const pdf = file(Buffer.from('%PDF-1.4'), 'paper.pdf', 'application/pdf');
+  const png = file(Buffer.from([0x89, 0x50, 0x4e, 0x47]), 'shot.png', 'image/png');
+  const odt = file(zip({ mimetype: 'x', 'content.xml': '<text:p>Hi</text:p>' }, true), 'note.odt');
+  const r = await F.convertAll([pdf, png, odt], chat);
+  assert.equal(r.files[0], pdf);
+  assert.equal(r.files[1], png);
+  assert.equal(r.files[2].name, 'note.odt.txt');
+  const keep = await F.convertAll([odt], folder);
+  assert.equal(keep.files[0], odt);
 });

@@ -33,4 +33,17 @@
         <item quantity="one">Running %d command</item>
         <item quantity="other">Running %d commands</item>
     </plurals>
+
+    <!-- Isolated artifact viewer (GeneratedAppActivity) -->
+    <string name="viewer_close">Close</string>
+    <string name="viewer_untitled">Artifact</string>
+    <string name="viewer_subtitle">Isolated app · HTML</string>
+    <string name="viewer_preview">Preview</string>
+    <string name="viewer_code">Code</string>
+    <string name="viewer_rerun">Re-run</string>
+    <string name="viewer_share">Share</string>
+    <string name="viewer_share_title">Share generated HTML?</string>
+    <string name="viewer_share_message">Review the source for private data. The exported file contains executable code.</string>
+    <string name="viewer_cancel">Cancel</string>
+    <string name="viewer_share_chooser">Share application</string>
 </resources>

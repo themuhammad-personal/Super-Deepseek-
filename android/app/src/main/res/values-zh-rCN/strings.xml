@@ -24,4 +24,17 @@
     <plurals name="sandbox_running">
         <item quantity="other">正在运行 %d 条命令</item>
     </plurals>
+
+    <!-- Isolated artifact viewer (GeneratedAppActivity) -->
+    <string name="viewer_close">关闭</string>
+    <string name="viewer_untitled">工件</string>
+    <string name="viewer_subtitle">隔离应用 · HTML</string>
+    <string name="viewer_preview">预览</string>
+    <string name="viewer_code">代码</string>
+    <string name="viewer_rerun">重新运行</string>
+    <string name="viewer_share">分享</string>
+    <string name="viewer_share_title">分享生成的 HTML？</string>
+    <string name="viewer_share_message">请检查源代码中是否有隐私信息。导出的文件包含可执行代码。</string>
+    <string name="viewer_cancel">取消</string>
+    <string name="viewer_share_chooser">分享应用</string>
 </resources>

@@ -1,4 +1,4 @@
-# Generative UI — readiness report (2.70.0, 2026-10-21)
+# Generative UI — readiness report (2.70.1, 2026-10-21)
 
 **Status:** implemented and verified in automated tests (JVM/Robolectric,
 Node, real Chromium) and against real public MCP servers.
@@ -10,6 +10,23 @@ Node, real Chromium) and against real public MCP servers.
 * Live-model compliance with the v3 prompt (not measured).
 
 Read "Not verified" before relying on anything here.
+
+## What changed in 2.70.1 (full review of 2.70.0)
+
+| Area | Bug found | Fix |
+|---|---|---|
+| Updater | The stable channel never offered an update: the continuous release is tagged `latest`, so no version could be read from the tag. | The version is read from the release notes (`**Version:**` line), never the title; tested against the real release. Repository pointer → `Super-Deepseek-`. |
+| Uploads | A zip bomb (forged sizes) could unpack without limit and exhaust the WebView's memory. | Inflate streams with a hard cap (4 MB per archive entry, 32 MB per document part). |
+| Uploads | A 100 MB text file was decoded in full (~200 MB string). | Non-archives are read up to 24 MB, with a note. |
+| Uploads | UTF-16 files (Windows Notepad) were treated as binary. | Byte-order mark detected, decoded as text. |
+| Uploads | With no `accept` list on the chat input nothing was converted, so odt/epub/rtf/zip reached DeepSeek as is. | DeepSeek's documented formats are assumed for the chat input only. |
+| Web access | Requests queued behind the consent sheet skipped the 6-concurrent cap and all fired at once; a 7th parallel request simply failed. | At most 6 run at once and the rest wait their turn (up to 32 open, 60/min), like a browser. |
+| Web access | `fetch(new Request(url, {method:'POST', body}))` was sent as a GET without its body; `FormData`/`Blob` bodies became `{}`. | Method, headers and body of a Request are kept; FormData, URLSearchParams and Blob are encoded as the browser would (with their Content-Type). |
+| MCP Apps | After an app restart, an MCP app in an old chat showed "Unknown MCP server" until that server was used again. | The list of servers the page used is persisted (URLs only, never keys); unknown URLs are still refused. |
+| Full-screen viewer | Its labels were hard-coded English. | String resources in all six app languages (no test: layout labels). |
+| CI | Actions on the deprecated Node 20 runtime; `ubuntu-latest` is moving to 26.04. | Node 24 majors, runner pinned to `ubuntu-24.04`. |
+
+Every behaviour fix has a test that fails on the old code (JS 159 in total, Kotlin +3).
 
 ## What changed in 2.70 (after testing 2.60.1)
 

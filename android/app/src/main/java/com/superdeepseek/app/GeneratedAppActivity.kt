@@ -58,11 +58,11 @@ class GeneratedAppActivity : Activity() {
             minWidth = px(44); minHeight = px(44); if (ripple != 0) setBackgroundResource(ripple); setOnClickListener { onClick() }
         }
         val bar = LinearLayout(this).apply { gravity = android.view.Gravity.CENTER_VERTICAL; setPadding(px(4), px(4), px(8), px(4)) }
-        bar.addView(iconButton("\u2715", "Close") { finish() })
+        bar.addView(iconButton("\u2715", getString(R.string.viewer_close)) { finish() })
         val titles = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(px(4), 0, px(8), 0) }
-        val docTitle = Regex("<title>([^<]{1,80})</title>", RegexOption.IGNORE_CASE).find(html)?.groupValues?.get(1)?.trim()?.takeIf { it.isNotEmpty() } ?: "Artifact"
+        val docTitle = Regex("<title>([^<]{1,80})</title>", RegexOption.IGNORE_CASE).find(html)?.groupValues?.get(1)?.trim()?.takeIf { it.isNotEmpty() } ?: getString(R.string.viewer_untitled)
         titles.addView(TextView(this).apply { text = docTitle; textSize = 15f; setTextColor(c.fg); maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END; typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL) })
-        titles.addView(TextView(this).apply { text = "Isolated app · HTML"; textSize = 12f; setTextColor(c.fg3); maxLines = 1 })
+        titles.addView(TextView(this).apply { text = getString(R.string.viewer_subtitle); textSize = 12f; setTextColor(c.fg3); maxLines = 1 })
         bar.addView(titles, LinearLayout.LayoutParams(0, -2, 1f))
         val seg = LinearLayout(this).apply {
             background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = px(10).toFloat(); setColor(c.bg2) }
@@ -74,7 +74,7 @@ class GeneratedAppActivity : Activity() {
             v.setTextColor(if (on) c.fg else c.fg3)
             v.background = if (on) android.graphics.drawable.GradientDrawable().apply { cornerRadius = px(8).toFloat(); setColor(c.bg); setStroke(px(1) / 2 + 1, c.line) } else null
         }
-        listOf("Preview", "Code").forEachIndexed { i, label ->
+        listOf(getString(R.string.viewer_preview), getString(R.string.viewer_code)).forEachIndexed { i, label ->
             val v = TextView(this).apply {
                 text = label; textSize = 13f; gravity = android.view.Gravity.CENTER; setPadding(px(12), 0, px(12), 0); minHeight = px(32)
                 contentDescription = label
@@ -84,13 +84,13 @@ class GeneratedAppActivity : Activity() {
         }
         paintSeg()
         bar.addView(seg)
-        bar.addView(iconButton("\u21BB", "Re-run") { if (!showingCode) web?.reload() })
-        bar.addView(iconButton("\u2197", "Share") {
+        bar.addView(iconButton("\u21BB", getString(R.string.viewer_rerun)) { if (!showingCode) web?.reload() })
+        bar.addView(iconButton("\u2197", getString(R.string.viewer_share)) {
             android.app.AlertDialog.Builder(this@GeneratedAppActivity)
-                .setTitle("Share generated HTML?")
-                .setMessage("Review the source for private data. The exported file contains executable code.")
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Share") { _, _ ->
+                .setTitle(R.string.viewer_share_title)
+                .setMessage(R.string.viewer_share_message)
+                .setNegativeButton(R.string.viewer_cancel, null)
+                .setPositiveButton(R.string.viewer_share) { _, _ ->
                     runCatching {
                         val uri = androidx.core.content.FileProvider.getUriForFile(this@GeneratedAppActivity, "$packageName.fileprovider", artifactFile!!)
                         val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
@@ -99,7 +99,7 @@ class GeneratedAppActivity : Activity() {
                             addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                             clipData = android.content.ClipData.newRawUri("Generated application", uri)
                         }
-                        startActivity(android.content.Intent.createChooser(send, "Share application"))
+                        startActivity(android.content.Intent.createChooser(send, getString(R.string.viewer_share_chooser)))
                     }
                 }.show()
         })

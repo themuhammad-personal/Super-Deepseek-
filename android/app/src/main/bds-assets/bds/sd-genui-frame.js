@@ -252,12 +252,28 @@
       init = init || {};
       var url = abs(typeof input === 'string' ? input : (input && input.url) || String(input));
       if (!url) return Promise.reject(new TypeError('sdFetch: only absolute http(s) URLs'));
+      var req = input && typeof input === 'object' && typeof input.clone === 'function' && typeof input.method === 'string' ? input : null;
+      var method = String(init.method || (req && req.method) || 'GET').toUpperCase();
       var headers = {};
-      try { var h = new Headers(init.headers || (input && input.headers) || {}); h.forEach(function (v, k) { headers[k] = v; }); } catch (e) {}
-      var body = init.body;
-      if (body != null && typeof body !== 'string') { try { body = body instanceof URLSearchParams ? body.toString() : JSON.stringify(body); } catch (e) { body = String(body); } }
+      try { var h = new Headers(init.headers || (req && req.headers) || {}); h.forEach(function (v, k) { headers[k] = v; }); } catch (e) {}
+      // The body as text, the way the browser would encode it (FormData gets its multipart
+      // boundary, URLSearchParams / Blob their type). A Request's own body is read too.
+      var raw = init.body, bodyP;
+      if (raw == null && req && method !== 'GET' && method !== 'HEAD') bodyP = req.clone().text().then(function (t) { return { text: t }; });
+      else if (raw == null || typeof raw === 'string') bodyP = Promise.resolve({ text: raw });
+      else {
+        var native0 = (typeof FormData !== 'undefined' && raw instanceof FormData) || (typeof Blob !== 'undefined' && raw instanceof Blob) ||
+          (typeof URLSearchParams !== 'undefined' && raw instanceof URLSearchParams) || raw instanceof ArrayBuffer || ArrayBuffer.isView(raw);
+        if (native0) {
+          var enc; try { enc = new Response(raw); } catch (e) { enc = null; }
+          bodyP = enc ? enc.text().then(function (t) { return { text: t, type: enc.headers.get('content-type') }; }) : Promise.resolve({ text: String(raw) });
+        } else { var j; try { j = JSON.stringify(raw); } catch (e) { j = String(raw); } bodyP = Promise.resolve({ text: j, type: 'application/json' }); }
+      }
       var id = 'f' + (++seq);
-      return new Promise(function (res, rej) {
+      return bodyP.then(function (b) {
+        if (b.type && !headers['content-type']) headers['content-type'] = b.type;
+        var body = b.text;
+        return new Promise(function (res, rej) {
         pend[id] = function (d) {
           if (!d.status && !d.ok) { rej(new TypeError('Failed to fetch: ' + (d.error || 'network error'))); return; }
           var bytes = d.base64 != null ? b64ToBytes(d.base64) : (d.text != null ? d.text : '');
@@ -267,7 +283,8 @@
           try { Object.defineProperty(r, 'url', { value: d.url || url }); } catch (e) {}
           res(r);
         };
-        post({ type: 'fetch', id: id, url: url, method: String(init.method || (input && typeof input === 'object' && input.method) || 'GET').toUpperCase(), headers: headers, body: body == null ? '' : String(body).slice(0, 262144) });
+        post({ type: 'fetch', id: id, url: url, method: method, headers: headers, body: body == null ? '' : String(body).slice(0, 262144) });
+        });
       });
     }
     function sdImage(url) {
@@ -459,10 +476,11 @@
     function request(ctrl, d) {
       if (!d || typeof d.id !== 'string' || d.id.length > 24) return;
       var now = Date.now();
-      ctrl._net = ctrl._net || { times: [], once: Object.create(null), active: 0 };
+      ctrl._net = ctrl._net || { times: [], once: Object.create(null), active: 0, open: 0, wait: [] };
       var st = ctrl._net;
       st.times = st.times.filter(function (x) { return now - x < 60000; });
-      if (st.times.length >= 60 || st.active >= 6) { reply(ctrl, d, { error: 'Too many requests from this visual' }); return; }
+      // At most 6 run at once; up to 32 may be open (running, queued or waiting for consent).
+      if (st.times.length >= 60 || st.open >= 32) { reply(ctrl, d, { error: 'Too many requests from this visual' }); return; }
       var u; try { u = new URL(String(d.url || '')); } catch (_) { reply(ctrl, d, { error: 'Invalid URL' }); return; }
       if (!hostAllowedSyntax(u)) { reply(ctrl, d, { error: 'Only public http(s) websites can be reached' }); return; }
       var method = String(d.method || 'GET').toUpperCase();
@@ -470,22 +488,30 @@
       var host = u.hostname.toLowerCase();
       if (denied[host]) { reply(ctrl, d, { error: 'Access to ' + host + ' was denied' }); return; }
       var ok = grants()[host] || st.once[host];
-      Promise.resolve(ok ? 'ok' : ask(ctrl, host)).then(function (v) {
-        if (v === 'deny' || v === 'timeout') { if (v === 'deny') denied[host] = true; reply(ctrl, d, { error: 'Access to ' + host + ' was denied' }); return; }
-        if (v === 'always') always(host);
-        if (v === 'once') st.once[host] = true;
+      st.open++;
+      function finish(r) { st.open--; reply(ctrl, d, r); }
+      // Runs now if fewer than 6 are in flight, else when one finishes (requests that queued
+      // up behind a consent sheet must not all fire at once — nor fail: they wait their turn).
+      function dispatch() {
+        if (st.active >= 6) { st.wait.push(dispatch); return; }
         var bridge = root.__sdBridgeFetch;
-        if (typeof bridge !== 'function') { reply(ctrl, d, { error: 'Web access is unavailable here' }); return; }
-        // Checked again here: requests that queued up behind a consent sheet must not all fire at once.
+        if (typeof bridge !== 'function') { finish({ error: 'Web access is unavailable here' }); return; }
         var t2 = Date.now(); st.times = st.times.filter(function (x) { return t2 - x < 60000; });
-        if (st.times.length >= 60 || st.active >= 6) { reply(ctrl, d, { error: 'Too many requests from this visual' }); return; }
+        if (st.times.length >= 60) { finish({ error: 'Too many requests from this visual' }); return; }
         st.times.push(t2); st.active++;
         var Ho = root.__sdGenUIHost, lid = Ho && Ho.ledger && Ho.ledger.record({ type: 'fetch', title: host, detail: method + ' ' + u.pathname.slice(0, 80), state: 'running' });
-        Promise.resolve(bridge({ type: 'bds-frame-fetch', url: u.href, method: method, headers: d.headers && typeof d.headers === 'object' ? d.headers : {}, body: typeof d.body === 'string' ? d.body : '' }))
-          .then(function (r) { r = r || {}; if (Ho && lid) Ho.ledger.update(lid, { state: r.ok ? 'done' : 'failed', endedAt: Date.now() }); reply(ctrl, d, r); },
-                function (e) { if (Ho && lid) Ho.ledger.update(lid, { state: 'failed', endedAt: Date.now() }); reply(ctrl, d, { error: String(e && e.message || e) }); })
-          .then(function () { st.active--; });
-      });
+        var call; try { call = Promise.resolve(bridge({ type: 'bds-frame-fetch', url: u.href, method: method, headers: d.headers && typeof d.headers === 'object' ? d.headers : {}, body: typeof d.body === 'string' ? d.body : '' })); }
+        catch (e) { call = Promise.reject(e); }
+        call.then(function (r) { r = r || {}; if (Ho && lid) Ho.ledger.update(lid, { state: r.ok ? 'done' : 'failed', endedAt: Date.now() }); finish(r); },
+                  function (e) { if (Ho && lid) Ho.ledger.update(lid, { state: 'failed', endedAt: Date.now() }); finish({ error: String(e && e.message || e) }); })
+          .then(function () { st.active--; var next = st.wait.shift(); if (next) next(); });
+      }
+      Promise.resolve(ok ? 'ok' : ask(ctrl, host)).then(function (v) {
+        if (v === 'deny' || v === 'timeout') { if (v === 'deny') denied[host] = true; finish({ error: 'Access to ' + host + ' was denied' }); return; }
+        if (v === 'always') always(host);
+        if (v === 'once') st.once[host] = true;
+        dispatch();
+      }, function (e) { finish({ error: String(e && e.message || e) }); });
     }
     return { request: request, grants: grants, revokeAll: function () { try { root.localStorage.removeItem(KEY); } catch (_) {} denied = Object.create(null); }, hostAllowedSyntax: hostAllowedSyntax };
   })();
@@ -632,6 +658,7 @@
     create: create,
     controllers: function () { return controllers.slice(); },
     sandbox: SANDBOX,
+    _fetchRuntime: fetchRuntime,
     protectLoops: protectLoops,
     protectDocumentScripts: protectDocumentScripts,
     loopLimitMs: LOOP_MS

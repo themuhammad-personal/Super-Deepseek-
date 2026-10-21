@@ -27,4 +27,17 @@
         <item quantity="many">Выполняется %d команд</item>
         <item quantity="other">Выполняется %d команды</item>
     </plurals>
+
+    <!-- Isolated artifact viewer (GeneratedAppActivity) -->
+    <string name="viewer_close">Закрыть</string>
+    <string name="viewer_untitled">Артефакт</string>
+    <string name="viewer_subtitle">Изолированное приложение · HTML</string>
+    <string name="viewer_preview">Просмотр</string>
+    <string name="viewer_code">Код</string>
+    <string name="viewer_rerun">Перезапустить</string>
+    <string name="viewer_share">Поделиться</string>
+    <string name="viewer_share_title">Поделиться созданным HTML?</string>
+    <string name="viewer_share_message">Проверьте исходный код на личные данные. Экспортированный файл содержит исполняемый код.</string>
+    <string name="viewer_cancel">Отмена</string>
+    <string name="viewer_share_chooser">Поделиться приложением</string>
 </resources>

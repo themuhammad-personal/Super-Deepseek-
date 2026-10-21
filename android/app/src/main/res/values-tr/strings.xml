@@ -25,4 +25,17 @@
         <item quantity="one">%d komut çalışıyor</item>
         <item quantity="other">%d komut çalışıyor</item>
     </plurals>
+
+    <!-- Isolated artifact viewer (GeneratedAppActivity) -->
+    <string name="viewer_close">Kapat</string>
+    <string name="viewer_untitled">Yapıt</string>
+    <string name="viewer_subtitle">Yalıtılmış uygulama · HTML</string>
+    <string name="viewer_preview">Önizleme</string>
+    <string name="viewer_code">Kod</string>
+    <string name="viewer_rerun">Yeniden çalıştır</string>
+    <string name="viewer_share">Paylaş</string>
+    <string name="viewer_share_title">Oluşturulan HTML paylaşılsın mı?</string>
+    <string name="viewer_share_message">Kaynağı özel veriler açısından gözden geçirin. Dışa aktarılan dosya çalıştırılabilir kod içerir.</string>
+    <string name="viewer_cancel">İptal</string>
+    <string name="viewer_share_chooser">Uygulamayı paylaş</string>
 </resources>

@@ -1,4 +1,4 @@
-# Super DeepSeek Generative UI — protocol (engine v3, app 2.70.0)
+# Super DeepSeek Generative UI — protocol (engine v3, app 2.70.1)
 
 The model's system prompt cannot be controlled and native tool calling is
 unreliable, so Generative UI travels **inside ordinary markdown** as fenced code
@@ -197,7 +197,11 @@ artifact previews:
 * Host checks before asking: http/https only, ports 80/443/8080/8443, no
   credentials in the URL, no dotless/`.local`/`.internal`/`.lan`/`.home`/
   `.corp`/localhost hosts, no private IP literals; GET/HEAD/POST only; at most
-  60 requests per minute and 6 in flight per surface.
+  60 requests per minute and 6 in flight per surface — further requests wait
+  their turn (up to 32 open per surface) instead of failing. (2.70.1)
+* A `Request` object keeps its method, headers and body; `FormData`,
+  `URLSearchParams`, `Blob` and typed-array bodies are encoded as the browser
+  would, with their `Content-Type`; a plain object is sent as JSON. (2.70.1)
 * Native `bds-frame-fetch` (`FrameFetchPolicy.kt`) re-checks everything: DNS
   answers are filtered (private, loopback, link-local, CGNAT, multicast,
   reserved, `fc00::/7`, `fe80::/10`, IPv4-mapped, documentation ranges) and
@@ -216,13 +220,23 @@ capture phase (before the page), so it covers DeepSeek's own upload button,
 the + sheet's *Upload file* and Android shares alike:
 
 * Files the input accepts (PDF, Office, images, text, code…) pass through
-  unchanged — DeepSeek parses them server-side.
+  unchanged — DeepSeek parses them server-side. If the chat's upload input
+  declares no `accept` list, the formats DeepSeek's web chat documents are
+  assumed (PDF, doc/docx, xls/xlsx/csv, ppt/pptx, txt/md, common code and data
+  files, jpg/png/gif/webp/bmp); folder pickers and the engine's own inputs are
+  never given that default. (2.70.1)
 * Refused files are converted to text **on the device** and uploaded as
   `<name>.txt`: OpenDocument (odt/ods/odp), EPUB (spine order), RTF,
   docx/xlsx/pptx when the input does not list them, ZIP-style archives
   (listing + readable inner files, 6 M chars budget), unknown text formats,
   and a strings/metadata summary for opaque binaries. Text over 1.5 M chars
-  is split into up to 12 noted parts.
+  is split into up to 12 noted parts. UTF-16 text (with a byte-order mark) is
+  read as text.
+* Unpacking is capped while it streams, never trusting the sizes an archive
+  declares: 4 MB per file inside an archive, 32 MB per document part (a zip
+  bomb is refused with a note, not unpacked). Files over 24 MB that are not
+  archives are read only up to 24 MB (more could not be uploaded anyway), with
+  a note saying so. (2.70.1)
 * Audio and video are refused with a message. Native picking streams files up
   to 100 MB (text and binary alike); DeepSeek's own server-side limits still
   apply to what it accepts.

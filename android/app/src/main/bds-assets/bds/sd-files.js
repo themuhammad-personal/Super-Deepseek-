@@ -52,6 +52,23 @@
     var n = String(name || '').toLowerCase(), d = n.lastIndexOf('.');
     return d > 0 ? n.slice(d) : '';
   }
+  // What the chat's upload takes when its input does not say (an empty `accept`):
+  // the formats DeepSeek's web chat documents — PDF, Word, Excel/CSV, PowerPoint,
+  // plain text / Markdown, common code and data files, and images. Anything else
+  // (odt, epub, rtf, zip, …) is converted. A text file that is converted only gains
+  // a .txt name; its content is unchanged, so a too-short list costs nothing.
+  var CHAT_DEFAULT_ACCEPT = '.pdf,.doc,.docx,.xls,.xlsx,.csv,.ppt,.pptx,.txt,.md,.markdown,.json,.xml,.html,.htm,' +
+    '.py,.js,.ts,.jsx,.tsx,.java,.kt,.c,.h,.cpp,.hpp,.cs,.go,.rs,.rb,.php,.swift,.css,.sql,.sh,.yaml,.yml,' +
+    '.jpg,.jpeg,.png,.gif,.webp,.bmp';
+  function isChatUpload(input) {
+    // DeepSeek's own composer input (the engine finds it the same way). Folder pickers
+    // and the engine's own inputs (which declare `accept`) are never given the default.
+    return !!(input && input.multiple && !(input.hasAttribute && input.hasAttribute('webkitdirectory')));
+  }
+  function acceptOf(input) {
+    var a = input ? String(input.accept || '').trim() : '';
+    return a || (isChatUpload(input) ? CHAT_DEFAULT_ACCEPT : '');
+  }
   function accepts(accept, file) {
     var N = window.__sdNative;
     if (N && typeof N._acceptsFile === 'function') return N._acceptsFile(accept, file);
@@ -365,7 +382,7 @@
 
   /** Files the input would refuse → converted Files. Returns { files, notes }. */
   function convertAll(list, input) {
-    var accept = input ? input.accept : '', notes = [], out = [];
+    var accept = acceptOf(input), notes = [], out = [];
     return list.reduce(function (p, f) {
       return p.then(function () {
         if (isAV(f)) { notes.push(t(f.name + ': audio and video are not supported', f.name + ': অডিও ও ভিডিও সমর্থিত নয়')); return; }
@@ -386,7 +403,7 @@
     }, Promise.resolve()).then(function () { return { files: out, notes: notes }; });
   }
 
-  function needsWork(f, input) { return isAV(f) || f.size > MAX_INPUT || !accepts(input.accept, f); }
+  function needsWork(f, input) { return isAV(f) || f.size > MAX_INPUT || !accepts(acceptOf(input), f); }
 
   // ── the change-event hand-off ──────────────────────────────────────────────
   var ours = typeof WeakSet === 'function' ? new WeakSet() : null;
@@ -413,5 +430,5 @@
   }
   document.addEventListener('change', onChange, true);
 
-  window.__sdFiles = { version: 1, extract: extract, convertAll: convertAll, partsOf: partsOf, _zipEntries: zipEntries, _rtf: rtf, _looksText: looksText, _isAV: isAV };
+  window.__sdFiles = { version: 1, extract: extract, convertAll: convertAll, partsOf: partsOf, _zipEntries: zipEntries, _rtf: rtf, _looksText: looksText, _isAV: isAV, _acceptOf: acceptOf };
 })();
