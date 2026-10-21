@@ -205,7 +205,8 @@ artifact previews:
 * Native `bds-frame-fetch` (`FrameFetchPolicy.kt`) re-checks everything: DNS
   answers are filtered (private, loopback, link-local, CGNAT, multicast,
   reserved, `fc00::/7`, `fe80::/10`, IPv4-mapped, documentation ranges) and
-  every hop — redirects included — is re-validated (`HopGuard`). **No cookies,
+  every hop — redirects included — is re-validated (`HopGuard`). IPv4 inside
+  NAT64/6to4 addresses is judged as IPv4; no proxy is ever used (2.70.1). **No cookies,
   no cache, no page credentials**; `Cookie`, `Origin`, `Referer`, `Host`,
   `Sec-*`, `Proxy-*` and `X-Forwarded-*` headers are dropped. Limits: 20 s,
   8 MB response (truncated flag), 256 KB request body. Every request is

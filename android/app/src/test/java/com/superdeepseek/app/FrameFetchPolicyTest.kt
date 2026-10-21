@@ -37,6 +37,18 @@ class FrameFetchPolicyTest {
             .forEach { assertFalse(it, FrameFetchPolicy.isBlockedAddress(ip(it))) }
     }
 
+    @Test fun `IPv4 embedded in NAT64, 6to4 and Teredo addresses is judged, documentation ranges blocked`() {
+        // NAT64 / 6to4 wrapping a private or loopback IPv4 address
+        listOf("64:ff9b::a00:1", "64:ff9b::7f00:1", "64:ff9b::c0a8:101", "64:ff9b:1::a9fe:a9fe", "2002:a00:1::1", "2002:7f00:1::",
+            "2001:0:4136:e378:8000:63bf:3fff:fdd2", "100::1", "192.0.2.10", "198.51.100.7", "203.0.113.200")
+            .forEach { assertTrue(it, FrameFetchPolicy.isBlockedAddress(ip(it))) }
+        // ...but a public IPv4 site reached through DNS64 on an IPv6-only mobile network works
+        listOf("64:ff9b::808:808", "64:ff9b::5db8:d822", "2002:808:808::1", "2001:4860:4860::8888")
+            .forEach { assertFalse(it, FrameFetchPolicy.isBlockedAddress(ip(it))) }
+        assertFalse(ok("http://[64:ff9b::a00:1]/"))
+        assertTrue(ok("http://[64:ff9b::808:808]/"))
+    }
+
     @Test fun `SafeDns refuses hosts resolving to private addresses (rebinding)`() {
         val rebinding = object : Dns { override fun lookup(hostname: String) = listOf(ip("93.184.216.34"), ip("10.0.0.1")) }
         try { FrameFetchPolicy.SafeDns(rebinding).lookup("evil.example"); fail() } catch (_: UnknownHostException) {}

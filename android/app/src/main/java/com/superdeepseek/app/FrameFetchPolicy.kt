@@ -67,6 +67,9 @@ internal object FrameFetchPolicy {
             if (o0 == 172 && o1 in 16..31) return true
             if (o0 == 192 && o1 == 168) return true
             if (o0 == 192 && o1 == 0 && (b[2].toInt() and 0xff) == 0) return true
+            if (o0 == 192 && o1 == 0 && (b[2].toInt() and 0xff) == 2) return true     // TEST-NET-1
+            if (o0 == 198 && o1 == 51 && (b[2].toInt() and 0xff) == 100) return true  // TEST-NET-2
+            if (o0 == 203 && o1 == 0 && (b[2].toInt() and 0xff) == 113) return true   // TEST-NET-3
             if (o0 == 198 && (o1 == 18 || o1 == 19)) return true // benchmarking
             if (o0 >= 224) return true                           // multicast + reserved + broadcast
             return false
@@ -82,6 +85,19 @@ internal object FrameFetchPolicy {
                 return isBlockedAddress(v4)
             }
             if (f0 == 0x20 && (b[1].toInt() and 0xff) == 0x01 && (b[2].toInt() and 0xff) == 0x0d && (b[3].toInt() and 0xff) == 0xb8) return true // 2001:db8::/32 docs
+            fun u(i: Int) = b[i].toInt() and 0xff
+            fun v4At(i: Int) = InetAddress.getByAddress(byteArrayOf(b[i], b[i + 1], b[i + 2], b[i + 3]))
+            // NAT64 (64:ff9b::/96 well-known, 64:ff9b:1::/48 local-use): IPv6-only mobile
+            // networks synthesize these for every IPv4-only site, so the embedded IPv4
+            // address (last 32 bits) is judged rather than the prefix.
+            if (u(0) == 0x00 && u(1) == 0x64 && u(2) == 0xff && u(3) == 0x9b) {
+                val wellKnown = (4 until 12).all { u(it) == 0 }
+                val localUse = u(4) == 0x00 && u(5) == 0x01
+                if (wellKnown || localUse) return isBlockedAddress(v4At(12))
+            }
+            if (u(0) == 0x20 && u(1) == 0x02) return isBlockedAddress(v4At(2))                       // 6to4 2002::/16
+            if (u(0) == 0x20 && u(1) == 0x01 && u(2) == 0x00 && u(3) == 0x00) return true           // Teredo 2001::/32
+            if (u(0) == 0x01 && u(1) == 0x00 && (2 until 8).all { u(it) == 0 }) return true         // discard 100::/64
             return false
         }
         return true

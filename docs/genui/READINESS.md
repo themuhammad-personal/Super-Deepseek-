@@ -22,11 +22,13 @@ Read "Not verified" before relying on anything here.
 | Uploads | With no `accept` list on the chat input nothing was converted, so odt/epub/rtf/zip reached DeepSeek as is. | DeepSeek's documented formats are assumed for the chat input only. |
 | Web access | Requests queued behind the consent sheet skipped the 6-concurrent cap and all fired at once; a 7th parallel request simply failed. | At most 6 run at once and the rest wait their turn (up to 32 open, 60/min), like a browser. |
 | Web access | `fetch(new Request(url, {method:'POST', body}))` was sent as a GET without its body; `FormData`/`Blob` bodies became `{}`. | Method, headers and body of a Request are kept; FormData, URLSearchParams and Blob are encoded as the browser would (with their Content-Type). |
+| Web access (native) | With a proxy or a local VPN/proxy app on the phone, the proxy resolved the target itself, so the private-address DNS filter could be bypassed. | Visual fetches never use a proxy. |
+| Web access (native) | IPv6 addresses wrapping a private IPv4 address (NAT64 `64:ff9b::/96`, 6to4, Teredo) were not recognised. | The embedded IPv4 address is judged, so DNS64 on IPv6-only mobile networks still reaches public sites; Teredo, discard and TEST-NET ranges are blocked. |
 | MCP Apps | After an app restart, an MCP app in an old chat showed "Unknown MCP server" until that server was used again. | The list of servers the page used is persisted (URLs only, never keys); unknown URLs are still refused. |
 | Full-screen viewer | Its labels were hard-coded English. | String resources in all six app languages (no test: layout labels). |
 | CI | Actions on the deprecated Node 20 runtime; `ubuntu-latest` is moving to 26.04. | Node 24 majors, runner pinned to `ubuntu-24.04`. |
 
-Every behaviour fix has a test that fails on the old code (JS 159 in total, Kotlin +3).
+Every behaviour fix has a test that fails on the old code (JS 159 in total, Kotlin +4), except the proxy switch (one builder line, reviewed).
 
 ## What changed in 2.70 (after testing 2.60.1)
 

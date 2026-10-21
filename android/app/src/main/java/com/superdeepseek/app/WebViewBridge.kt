@@ -1406,6 +1406,9 @@ class WebViewBridge(
     private val frameFetchClient: OkHttpClient by lazy {
         this.httpClient.newBuilder()
             .dns(FrameFetchPolicy.SafeDns())
+            // Never through a proxy: a proxy resolves the target itself, so SafeDns would
+            // only see the proxy's name (a local proxy/VPN app could then reach the LAN).
+            .proxy(java.net.Proxy.NO_PROXY)
             .cookieJar(okhttp3.CookieJar.NO_COOKIES)
             .cache(null)
             // Every hop (redirects included) is re-checked: SafeDns never sees
