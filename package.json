@@ -10,7 +10,7 @@
   },
   "scripts": {
     "test": "npm run test:engine && npm run test:compliance-harness",
-    "test:engine": "node --test android/app/src/test/js/",
+    "test:engine": "node --test android/app/src/test/js/*.test.mjs",
     "test:compliance-harness": "node scripts/genui-compliance.mjs --self-test",
     "genui:acceptance": "node scripts/genui-browser-check.mjs",
     "genui:compliance": "node scripts/genui-compliance.mjs",
