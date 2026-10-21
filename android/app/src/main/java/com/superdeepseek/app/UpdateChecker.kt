@@ -335,7 +335,7 @@ internal class UpdateChecker(
             return UpdateCheckResult.Failed("no-apk-asset")
         }
 
-        val versionName = release.optString("tag_name").removePrefix("v")
+        val versionName = releaseVersionName(release.optString("tag_name"), release.optString("body", ""))
         val digest = parseSha256Digest(asset.optString("digest", ""))
         val uploadedAt = parseIso8601Millis(asset.optString("updated_at", ""))
         val buildId = parseBuildId(release.optString("body", ""))
@@ -447,7 +447,7 @@ internal class UpdateChecker(
 
         private const val DEFAULT_API_BASE_URL = "https://api.github.com"
         private const val DEFAULT_REPO_OWNER = "themuhammad-personal"
-        private const val DEFAULT_REPO_NAME = "Deepseek-"
+        private const val DEFAULT_REPO_NAME = "Super-Deepseek-"
 
         /**
          * GitHub's API rejects requests without a User-Agent and asks integrators to identify
@@ -496,6 +496,21 @@ internal const val REASON_NEWER_BUILD_ID = "newer-build-id"
  * Returns 0 when the release carries no id, which callers must treat as "unknown" rather than
  * "older": the tagged releases are published without one, and so are APKs built outside CI.
  */
+/**
+ * The version a release carries. Tagged releases (`v2.70.0`) name it in the tag. The continuous
+ * build that every push to `main` publishes is always tagged `latest`, so its version comes from
+ * the `**Version:** `x.y.z`` line the workflow writes into the release notes. The release title
+ * ("Continuous Build #12") is never used: its run number would be misread as a version.
+ */
+internal fun releaseVersionName(tag: String?, body: String?): String {
+    val fromTag = (tag ?: "").removePrefix("v")
+    if (Regex("""^\d+(?:\.\d+)+""").containsMatchIn(fromTag)) return fromTag
+    val fromBody = Regex(VERSION_LINE_PATTERN).find(body ?: "")?.groupValues?.get(1)
+    return fromBody ?: fromTag
+}
+
+internal const val VERSION_LINE_PATTERN = """\*\*Version:\*\*\s*`v?(\d+(?:\.\d+)+)`"""
+
 internal fun parseBuildId(raw: String?): Long {
     val text = raw ?: return 0L
     val match = Regex(BUILD_ID_PATTERN).find(text) ?: Regex(BUILD_LINE_PATTERN).find(text) ?: return 0L

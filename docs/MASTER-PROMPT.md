@@ -1,7 +1,7 @@
 # Master prompt: real-world testing, updates and a full bug hunt for Super DeepSeek
 
 **কীভাবে ব্যবহার করবেন:** নিচের দাগের পরের সবটুকু কপি করে এমন একটা কোডিং এজেন্টকে দিন,
-যার এই রিপোজিটরিতে (GitHub `themuhammad-personal/Deepseek-`) কাজ করার অ্যাক্সেস আছে।
+যার এই রিপোজিটরিতে (GitHub `themuhammad-personal/Super-Deepseek-`) কাজ করার অ্যাক্সেস আছে।
 শেষে যোগ করুন কোন ব্রাঞ্চে কাজ করবে, আর এবার কোন কাজটা আগে চান (না বললে নিচের
 অগ্রাধিকার অনুযায়ী করবে)।
 

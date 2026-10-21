@@ -64,7 +64,7 @@ in one answer**, with prose between them:
 1. **Analyze + discover** — read `SKILL.md`, `docs/genui/`, existing `bds-assets/bds/`.
 2. **Choose type(s)** — svg / sds-ui / html-app / tool-result / mcp-app; multi-block.
 3. **Build spec-first** — one thing per block, state only in the contract.
-4. **Validate** — `cd android && ./gradlew testDebugUnitTest`; JS: `node --test app/src/test/js/`.
+4. **Validate** — `cd android && ./gradlew testDebugUnitTest`; JS: `npm run test:engine` (from the repo root).
 5. **Prove in-browser** — `scripts/genui-browser-check.mjs` (Chromium/Playwright, 390×844 + 1280×720).
 6. **Package** — `assembleDebug`/`assembleRelease`; legacy `.apk` only (honest labels).
 

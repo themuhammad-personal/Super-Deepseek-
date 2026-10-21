@@ -8,11 +8,11 @@
 
 Linux Studio · AI agent · slash commands · memory · MCP tools · Deep Research · one-tap exports
 
-[![Download APK](https://img.shields.io/badge/Download-APK-4d6bfe?style=for-the-badge&logo=android&logoColor=white)](https://github.com/themuhammad-personal/Deepseek-/releases/latest/download/super-deepseek-latest.apk)
+[![Download APK](https://img.shields.io/badge/Download-APK-4d6bfe?style=for-the-badge&logo=android&logoColor=white)](https://github.com/themuhammad-personal/Super-Deepseek-/releases/latest/download/super-deepseek-latest.apk)
 &nbsp;
-[![Latest release](https://img.shields.io/github/v/release/themuhammad-personal/Deepseek-?style=for-the-badge&label=release&color=1f2233)](https://github.com/themuhammad-personal/Deepseek-/releases)
+[![Latest release](https://img.shields.io/github/v/release/themuhammad-personal/Super-Deepseek-?style=for-the-badge&label=release&color=1f2233)](https://github.com/themuhammad-personal/Super-Deepseek-/releases)
 
-[![Build](https://github.com/themuhammad-personal/Deepseek-/actions/workflows/build-and-release-apk.yml/badge.svg)](https://github.com/themuhammad-personal/Deepseek-/actions/workflows/build-and-release-apk.yml)
+[![Build](https://github.com/themuhammad-personal/Super-Deepseek-/actions/workflows/build-and-release-apk.yml/badge.svg)](https://github.com/themuhammad-personal/Super-Deepseek-/actions/workflows/build-and-release-apk.yml)
 ![Android 8.0+](https://img.shields.io/badge/Android-8.0%2B-3ddc84?logo=android&logoColor=white)
 ![Languages](https://img.shields.io/badge/UI-6%20languages-8a63d2)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -136,7 +136,7 @@ else below is extra.
 
 ## Install
 
-1. Download **[super-deepseek-latest.apk](https://github.com/themuhammad-personal/Deepseek-/releases/latest/download/super-deepseek-latest.apk)** on your phone.
+1. Download **[super-deepseek-latest.apk](https://github.com/themuhammad-personal/Super-Deepseek-/releases/latest/download/super-deepseek-latest.apk)** on your phone.
 2. Open it and allow installing from this source when Android asks.
 3. Sign in with your DeepSeek account. That's it.
 
@@ -253,7 +253,7 @@ The app only contacts other services when a feature needs them:
 
 Issues and pull requests are welcome, especially translations, bug reports with screenshots,
 and new commands or tools.
-[Open an issue →](https://github.com/themuhammad-personal/Deepseek-/issues/new)
+[Open an issue →](https://github.com/themuhammad-personal/Super-Deepseek-/issues/new)
 
 ## License
 

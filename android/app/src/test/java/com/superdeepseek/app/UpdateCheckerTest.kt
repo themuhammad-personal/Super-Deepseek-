@@ -65,6 +65,34 @@ class UpdateCheckerTest {
     }
 
     @Test
+    fun `continuous builds tagged latest take their version from the release notes`() {
+        val body = "### Super DeepSeek for Android\n\n**Version:** `2.70.1`\n**Build:** `7`\n<!-- bds-build-id: 7 -->"
+        assertEquals("2.70.1", releaseVersionName("latest", body))
+        assertEquals(listOf(2, 70, 1), parseVersion(releaseVersionName("latest", body)))
+        // A real version tag always wins over the notes.
+        assertEquals("2.71.0", releaseVersionName("v2.71.0", body))
+        // No tag version and no notes line: nothing comparable, never the title's run number.
+        assertEquals("latest", releaseVersionName("latest", "Continuous Build #12"))
+        assertNull(parseVersion(releaseVersionName("latest", "")))
+    }
+
+    @Test
+    fun `a continuous build of the same version with a newer run number is offered on the release channel`() {
+        val d = decideUpdate(
+                channel = UpdateChannel.RELEASE,
+                remoteVersionName = releaseVersionName("latest", "**Version:** `2.70.1`\n<!-- bds-build-id: 9 -->"),
+                installedVersionName = "2.70.1",
+                remoteBuildId = 9L,
+                installedBuildId = 7L,
+                remoteUploadedAtMillis = 0L,
+                installedLastUpdateTimeMillis = 0L,
+                remoteDigest = "abc",
+                declinedDigest = null,
+        )
+        assertTrue(d.available)
+    }
+
+    @Test
     fun `version parsing returns null when there is no number`() {
         // "latest" is the beta channel's tag. Null means unknown, never older.
         assertNull(parseVersion("latest"))
