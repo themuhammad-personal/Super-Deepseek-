@@ -16,7 +16,7 @@ const plain = (v) => JSON.parse(JSON.stringify(v));
  * 700 ms…6 s continuity timers then take a few ms); `listeners` collects what
  * the agent registers on `document` so tests can fire (trusted) events.
  */
-function load({ info = { supported: true, enabled: true, mode: 'auto' }, history = null, href = 'https://chat.deepseek.com/a/chat/s/abc', speed = 1 } = {}) {
+function load({ info = { supported: true, enabled: true, mode: 'auto' }, history = null, href = 'https://chat.deepseek.com/a/chat/s/abc', speed = 1, fetch = null } = {}) {
   const events = new EventTarget();
   const calls = [];
   const stops = [];
@@ -57,7 +57,7 @@ function load({ info = { supported: true, enabled: true, mode: 'auto' }, history
     },
   };
   ctx.window = ctx;
-  ctx.__sdBridgeFetch = async (payload) => { calls.push(payload); return { ok: true, result: { content: [] } }; };
+  ctx.__sdBridgeFetch = async (payload) => { calls.push(payload); return fetch ? fetch(payload) : { ok: true, result: { content: [] } }; };
   vm.createContext(ctx);
   vm.runInContext(SRC, ctx);
   const fire = (type, ev) => (listeners[type] || []).forEach((fn) => fn(ev));
@@ -278,8 +278,11 @@ test('prompt context: live sandbox state for the tool instructions', () => {
   assert.deepEqual(pc({ supported: false }), []);
   assert.deepEqual(pc({ supported: true, enabled: false }), []);
   const fresh = pc({ supported: true, enabled: true, installed: false, mode: 'auto', jobs: [], workspace: [] });
-  assert.equal(fresh.length, 1);
+  assert.equal(fresh.length, 2);
   assert.match(fresh[0], /not set up yet/);
+  // T5: the run rules ride along with the instructions.
+  assert.match(fresh[1], /progress card/);
+  assert.match(fresh[1], /read_file \(offset_line, max_lines\)/);
   assert.doesNotMatch(fresh[0], /workspace/);
   const busy = pc({
     supported: true, enabled: true, installed: true, mode: 'ask', freeMb: 120,
@@ -508,4 +511,139 @@ test('scroll guard: the agent UI and small or editable scrollers are left alone'
   fire('scroll', { target: tiny });
   tiny.top = 820;
   fire('scroll', { target: tiny });
+});
+
+// ── 2.71.0: output saving and the step cap ──────────────────────────────────
+
+/** A tiny DOM: enough for the confirm sheet (buttons are clicked by text). */
+function fakeDom(win) {
+  const appended = [];
+  const el = (tag) => {
+    const e = { tagName: tag, children: [], textContent: '', className: '', id: '', listeners: {},
+      appendChild(c) { this.children.push(c); return c; },
+      addEventListener(type, fn) { this.listeners[type] = fn; },
+      remove() { const i = appended.indexOf(this); if (i >= 0) appended.splice(i, 1); },
+      classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+      setAttribute() {}, querySelector: () => null, querySelectorAll: () => [] };
+    return e;
+  };
+  win.document.createElement = el;
+  win.document.getElementById = (id) => appended.find((e) => e.id === id) || null;
+  win.document.querySelectorAll = () => [];
+  win.document.body = { appendChild(c) { appended.push(c); return c; }, contains: () => true };
+  win.document.head = { appendChild() {} };
+  win.document.createTextNode = (text) => ({ nodeType: 3, textContent: text });
+  win.document.documentElement.appendChild = () => {};
+  win.document.documentElement.classList = { add() {}, remove() {}, toggle() {}, contains: () => false };
+  const buttons = () => {
+    const out = [];
+    const walk = (e) => { if (e.tagName === 'button') out.push(e); (e.children || []).forEach(walk); };
+    appended.forEach(walk);
+    return out;
+  };
+  const click = (text) => { const b = buttons().find((x) => x.textContent === text); assert.ok(b, 'button ' + text); b.listeners.click(); };
+  const heading = () => { let h = ''; const walk = (e) => { if (e.tagName === 'h3') h = e.textContent; (e.children || []).forEach(walk); }; appended.forEach(walk); return h; };
+  return { appended, click, heading };
+}
+
+test('a big output is saved in /tmp/sd-out through the unwrapped bridge', async () => {
+  const { win, calls } = load({ info: { supported: true, enabled: true, installed: true, mode: 'auto' } });
+  const p = await win.__sdSaveOutput('line\n'.repeat(5000), 'run');
+  assert.match(p, /^\/tmp\/sd-out\/[a-z0-9]+-run\.txt$/);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].toolName, 'write_file');
+  assert.equal(calls[0].serverUrl, 'sandbox://linux');
+  assert.equal(calls[0].args.path, p);
+  assert.equal(calls[0].args.content.length, 25000);
+  // Unique names, odd tool names are made safe.
+  const q = await win.__sdSaveOutput('x', '../evil tool');
+  assert.notEqual(q, p);
+  assert.match(q, /^\/tmp\/sd-out\/[a-z0-9]+-\.\._evil_tool\.txt$/);
+  assert.ok(!q.slice('/tmp/sd-out/'.length).includes('/'));
+});
+
+test('output saving is skipped when it could surprise the user', async () => {
+  const cases = [
+    { info: { supported: true, enabled: true, installed: false, mode: 'auto' } },   // would install Linux
+    { info: { supported: true, enabled: true, installed: true, mode: 'ask' } },     // every call is approved by hand
+    { info: { supported: true, enabled: false, installed: true, mode: 'auto' } },
+    { info: { supported: false } },
+  ];
+  for (const c of cases) {
+    const { win, calls } = load(c);
+    assert.equal(await win.__sdSaveOutput('x'.repeat(100), 'run'), null);
+    assert.equal(calls.length, 0);
+  }
+  const { win, calls } = load({ info: { supported: true, enabled: true, installed: true, mode: 'auto' } });
+  assert.equal(await win.__sdSaveOutput('x', 'read_file'), null);  // the file already exists
+  win.__sdAgentStopped = true;
+  assert.equal(await win.__sdSaveOutput('x', 'run'), null);
+  assert.equal(calls.length, 0);
+});
+
+test('a failed, erroring, throwing or hanging save returns null', async () => {
+  const info = { supported: true, enabled: true, installed: true, mode: 'auto' };
+  const replies = [
+    () => ({ ok: false, error: 'disk full' }),
+    () => ({ ok: true, result: { isError: true, content: [{ type: 'text', text: 'Sandbox error' }] } }),
+    () => { throw new Error('bridge gone'); },
+    () => new Promise(() => {}),   // never answers: the 8 s timeout wins
+  ];
+  for (const fetch of replies) {
+    const { win, calls } = load({ info, fetch, speed: 1000 });
+    assert.equal(await win.__sdSaveOutput('x'.repeat(10), 'run'), null);
+    assert.equal(calls.length, 1);
+  }
+});
+
+test('step cap: after 25 calls the user is asked; Continue allows 25 more', async () => {
+  const { win, calls } = load({ info: { supported: true, enabled: true, installed: true, mode: 'auto' } });
+  const dom = fakeDom(win);
+  const call = (n) => win.__sdBridgeFetch({ type: 'bds-mcp-call', serverUrl: 'https://x.example/mcp', apiKey: '', toolName: 't' + n, args: {} });
+  for (let i = 1; i <= 25; i++) await call(i);
+  assert.equal(calls.length, 25);
+  assert.equal(dom.appended.length, 0);
+  const p26 = call(26);
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(calls.length, 25, 'the 26th call waits for the answer');
+  assert.match(dom.heading(), /25 steps\. Continue\?/);
+  dom.click('Continue');
+  const r = await p26;
+  assert.equal(r.ok, true);
+  assert.equal(calls.length, 26);
+  for (let i = 27; i <= 50; i++) await call(i);
+  assert.equal(calls.length, 50);
+  assert.equal(dom.appended.length, 0);
+  const p51 = call(51);
+  await new Promise((r) => setTimeout(r, 5));
+  assert.match(dom.heading(), /50 steps/);
+  dom.click('Stop');
+  const r51 = await p51;
+  assert.equal(r51.ok, false);
+  assert.match(r51.error, /Stopped by the user/);
+  assert.equal(calls.length, 50);
+  assert.equal(win.__sdAgentStopped, true);
+});
+
+test('step cap: a new instruction of the user starts the count again', async () => {
+  const { win, calls, fire } = load({ info: { supported: true, enabled: true, installed: true, mode: 'auto' } });
+  fakeDom(win);
+  const call = () => win.__sdBridgeFetch({ type: 'bds-mcp-call', serverUrl: 'https://x.example/mcp', apiKey: '', toolName: 't', args: {} });
+  for (let i = 0; i < 20; i++) await call();
+  assert.equal(plain(win.__sdAgent.stepCap()).done, 20);
+  const box = { closest: (sel) => (/textarea/.test(sel) ? box : null) };
+  fire('input', { isTrusted: true, target: box });
+  assert.deepEqual(plain(win.__sdAgent.stepCap()), { done: 0, next: 25 });
+  for (let i = 0; i < 25; i++) await call();
+  assert.equal(calls.length, 45);
+});
+
+test('history of the open chat is available to the run drawer', async () => {
+  const history = [{ role: 'USER', content: 'hi' }, { role: 'ASSISTANT', fragments: [{ type: 'THINK', content: 'x' }, { type: 'RESPONSE', content: 'ok' }] }];
+  const { win } = load({ history });
+  const h = await win.__sdAgent.history();
+  assert.equal(h.length, 2);
+  assert.equal(win.__sdAgent.messageText(h[1]), 'ok');
+  const off = load({ href: 'https://chat.deepseek.com/' });
+  assert.equal(await off.win.__sdAgent.history(), null);
 });

@@ -61,6 +61,15 @@
       backdrop: function (s) { return s.parentElement; },
       close: function (s) { return s.querySelector('button'); },
       backdropIsParent: true,
+      ours: true,
+    },
+    {
+      // The agent's activity drawer (sd-run.js).
+      sel: '#sd-run-sheet .sd-run-panel',
+      backdrop: function (s) { return s.parentElement; },
+      close: function (s) { return s.querySelector('.sd-run-close'); },
+      backdropIsParent: true,
+      ours: true,
     },
   ];
 
@@ -297,9 +306,11 @@
     var wrapped = function () {
       try {
         var top = openSheets()[0];
-        // The agent's "Allow?" sheet is ours, the engine knows nothing about
-        // it: Back answers "Skip" (and never leaves the chat behind it).
-        if (top && top.kind.sel === '#sd-agent-confirm .sd-card') {
+        // Our own sheets (the agent's "Allow?" / "Continue?" sheet, the
+        // activity drawer): the engine knows nothing about them, so Back only
+        // closes them (it presses the first button / close) and never leaves
+        // the chat behind them.
+        if (top && top.kind.ours) {
           closeSheet(top, 0);
           return true;
         }

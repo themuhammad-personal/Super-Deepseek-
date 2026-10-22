@@ -27,9 +27,10 @@ android {
         // baseline (bdsBuildId = 0) and every later CI build (2_600_100 + run number, 2.60.1) update any
         // 2.50.x build in place. 2.70 (same key) starts at 2_700_000 so it updates every 2.60.x build;
         // 2.70.1 moves to 2_701_000 so it is above every 2.70.0 CI build (run numbers < 1000).
-        versionCode = (2_701_000L + bdsBuildId).toInt()
+        // 2.71.0 starts at 2_710_000 so it is above every 2.70.x build.
+        versionCode = (2_710_000L + bdsBuildId).toInt()
         // Keep in sync with package.json "version".
-        versionName = "2.70.1"
+        versionName = "2.71.0"
         buildConfigField("long", "BUILD_ID", "${bdsBuildId}L")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

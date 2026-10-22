@@ -343,6 +343,8 @@
   function resume() {
     flow.nudges = 0;
     flow.base = flow.calls;
+    cap.n = 0;
+    cap.next = STEP_CAP;
     if (window.__sdAgentStopped) window.__sdAgentStopped = false;
   }
 
@@ -857,7 +859,7 @@
         : '/root/workspace is empty.');
     }
     if (typeof c.freeMb === 'number' && c.freeMb >= 0 && c.freeMb < 500) parts.push('Only ' + c.freeMb + ' MB of storage is free.');
-    return ['Sandbox state when this message was sent: ' + parts.join(' ')];
+    return ['Sandbox state when this message was sent: ' + parts.join(' '), RUN_RULES];
   }
 
   // ── Settings → "Linux & Agent" ─────────────────────────────────────────────
@@ -1214,12 +1216,105 @@
     sweepSoon();
   }
 
+  // ── Token savers (2.71.0) ──────────────────────────────────────────────────
+  // T5: one line of rules in the tool instructions. Steps are shown to the
+  // user as one progress card, so prose between calls is wasted tokens.
+  var RUN_RULES = 'Between tool calls the user sees only a progress card, not your text: keep any text before calls to one short line and save explanations for the final summary. ' +
+    'Do not print whole big files or long logs; when a result says the full output was saved in the sandbox, read only the part you need with read_file (offset_line, max_lines) instead of running the command again.';
+
+  // T6: after every STEP_CAP tool calls in one instruction the user is asked
+  // whether to continue (each step is another DeepSeek turn).
+  var STEP_CAP = 25;
+  var cap = { n: 0, next: STEP_CAP, asking: null };
+
+  /** null = go on now; otherwise a promise of true (continue) / false (stop). */
+  function capGate() {
+    cap.n++;
+    if (cap.n <= cap.next) return null;
+    if (!cap.asking) {
+      cap.asking = askContinue(cap.n - 1).then(function (go) {
+        cap.asking = null;
+        if (go) cap.next += STEP_CAP;
+        else stopAgent(false);
+        return go;
+      });
+    }
+    return cap.asking;
+  }
+
+  function askContinue(done) {
+    return new Promise(function (resolve) {
+      if (!document.body || typeof document.createElement !== 'function') return resolve(true);
+      var old = document.getElementById('sd-agent-confirm');
+      if (old) old.remove();
+      var wrap = document.createElement('div');
+      wrap.id = 'sd-agent-confirm';
+      wrap.className = 'sd-cap';
+      var card = document.createElement('div');
+      card.className = 'sd-card';
+      var h = document.createElement('h3');
+      h.textContent = t('The agent has run ' + done + ' steps. Continue?', 'এজেন্ট ' + done + 'টি ধাপ চালিয়েছে। চালিয়ে যাব?');
+      var p = document.createElement('p');
+      p.textContent = t('Every step is another DeepSeek reply. Continue for up to ' + STEP_CAP + ' more steps, or stop here.',
+        'প্রতিটি ধাপে DeepSeek আবার উত্তর দেয়। আরও সর্বোচ্চ ' + STEP_CAP + 'টি ধাপ চালাতে পারেন, অথবা এখানেই থামাতে পারেন।');
+      var row = document.createElement('div');
+      row.className = 'sd-row';
+      function button(text, cls, value) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = text;
+        if (cls) b.className = cls;
+        b.addEventListener('click', function () { wrap.remove(); resolve(value); });
+        row.appendChild(b);
+      }
+      // The first button is what Back / dragging the sheet down presses (sd-sheets).
+      button(t('Stop', 'থামান'), '', false);
+      button(t('Continue', 'চালিয়ে যান'), 'sd-primary', true);
+      card.appendChild(h);
+      card.appendChild(p);
+      card.appendChild(row);
+      wrap.appendChild(card);
+      document.body.appendChild(wrap);
+    });
+  }
+
+  // T3: a big tool output is saved in the sandbox so only its head and tail go
+  // back to the model. Uses the unwrapped bridge: an app-internal write, never
+  // reachable through a payload flag. Returns the path, or null (then the old
+  // behaviour applies: the output is attached as a file).
+  var SAVE_DIR = '/tmp/sd-out/';
+  var SAVE_TIMEOUT_MS = 8000;
+  var rawFetch = null;
+  var saveSeq = 0;
+  function saveOutput(full, tool) {
+    try {
+      var i = info();
+      if (!rawFetch || window.__sdAgentStopped) return Promise.resolve(null);
+      if (!i.supported || i.enabled === false || !i.installed || i.installing || mode() === 'ask') return Promise.resolve(null);
+      if (tool === 'read_file' || typeof full !== 'string' || !full) return Promise.resolve(null);
+      var name = Date.now().toString(36) + (++saveSeq).toString(36) + '-' + String(tool || 'out').replace(/[^A-Za-z0-9_.-]+/g, '_').slice(0, 40) + '.txt';
+      var path = SAVE_DIR + name;
+      var timer = null;
+      var write = Promise.resolve()
+        .then(function () {
+          return rawFetch({ type: 'bds-mcp-call', serverUrl: SERVER.serverUrl, apiKey: '', toolName: 'write_file', args: { path: path, content: full } });
+        })
+        .then(function (r) { return r && r.ok && !(r.result && r.result.isError) ? path : null; }, function () { return null; });
+      var late = new Promise(function (resolve) { timer = setTimeout(function () { resolve(null); }, SAVE_TIMEOUT_MS); });
+      return Promise.race([write, late]).then(function (v) { clearTimeout(timer); return v; });
+    } catch (_) { return Promise.resolve(null); }
+  }
+
   function install() {
     var inner = window.__sdBridgeFetch;
     if (typeof inner === 'function' && !inner.__sdAgentWrapped) {
+      rawFetch = inner;
       var wrapped = function (payload) {
         if (payload && payload.type === 'bds-mcp-call') {
-          return trackMcp(isSandboxUrl(payload.serverUrl) ? sandboxCall(payload, inner) : inner(payload));
+          var run = function () { return trackMcp(isSandboxUrl(payload.serverUrl) ? sandboxCall(payload, inner) : inner(payload)); };
+          var gate = capGate();
+          if (!gate) return run();
+          return gate.then(function (go) { return go ? run() : stoppedReply(); });
         }
         return inner(payload);
       };
@@ -1238,6 +1333,7 @@
   install();
 
   window.__sdSandboxServers = sandboxServers;
+  window.__sdSaveOutput = saveOutput;
   window.__sdAgent = {
     version: 1,
     stop: stopAgent,
@@ -1251,6 +1347,10 @@
     statusShort: function () { try { return statusShort(); } catch (_) { return ''; } },
     /** Fills the "Linux & Agent" settings page (content.js sdLinuxPg). */
     mountSettings: mountSettings,
+    /** Raw messages of the open chat (for the run drawer, sd-run.js); null when unknown. */
+    history: function () { var sid = sessionId(); return sid ? requestHistory(sid) : Promise.resolve(null); },
+    messageText: messageText,
+    stepCap: function () { return { done: cap.n, next: cap.next }; },
     // Exposed for tests.
     _parseTags: parseTags,
     _tagArgs: tagArgs,

@@ -1,0 +1,239 @@
+// Tests for bds/sd-run.js (one card per agent run, 2.71.0). Run: npm run test:engine
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import vm from 'node:vm';
+import { fileURLToPath } from 'node:url';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const BDS = path.join(here, '../../main/bds-assets/bds');
+const RUN = fs.readFileSync(path.join(BDS, 'sd-run.js'), 'utf8');
+const AGENT = fs.readFileSync(path.join(BDS, 'sd-agent.js'), 'utf8');
+const plain = (v) => JSON.parse(JSON.stringify(v));
+
+/** sd-agent + sd-run in a vm without a page (body is null: nothing is scanned). */
+function load({ lang = 'en' } = {}) {
+  const storage = {};
+  const ctx = {
+    console, setTimeout, clearTimeout, Promise, JSON, Math, Object, Array, String, Number, Date, WeakMap, Set,
+    Uint8Array, TextDecoder, CustomEvent, isFinite,
+    setInterval: (fn, ms) => { const h = setInterval(fn, ms); h.unref(); return h; },
+    atob: (s) => Buffer.from(s, 'base64').toString('binary'),
+    navigator: { language: lang },
+    location: { href: 'https://chat.deepseek.com/a/chat/s/abc' },
+    localStorage: { getItem: (k) => (k in storage ? storage[k] : null), setItem: (k, v) => { storage[k] = String(v); }, removeItem: (k) => { delete storage[k]; } },
+    document: {
+      documentElement: { lang, classList: { toggle() {}, remove() {}, add() {} } },
+      body: null,
+      querySelector: () => null,
+      querySelectorAll: () => [],
+      addEventListener() {},
+    },
+    AndroidBridge: { sandboxInfo: () => JSON.stringify({ supported: true, enabled: true, mode: 'auto' }), sandboxAgentActive() {} },
+    addEventListener() {}, removeEventListener() {}, dispatchEvent: () => true,
+  };
+  ctx.window = ctx;
+  ctx.__sdBridgeFetch = async () => ({ ok: true, result: {} });
+  vm.createContext(ctx);
+  vm.runInContext(AGENT, ctx);
+  vm.runInContext(RUN, ctx);
+  return { win: ctx, R: ctx.__sdRun, storage };
+}
+
+const U = { role: 'user', auto: false, calls: 0 };
+const R = { role: 'user', auto: true, calls: 0 };
+const A = (calls = 0) => ({ role: 'assistant', auto: false, calls });
+
+test('a finished run: one visible reply with the card, the final answer, the rest hidden', () => {
+  const { R: run } = load();
+  const g = plain(run._groupRuns([U, A(2), R, A(1), R, A(0)]));
+  assert.equal(g.length, 1);
+  assert.deepEqual([g[0].user, g[0].host, g[0].final], [0, 1, 5]);
+  assert.deepEqual(g[0].hidden, [2, 3, 4]);
+  assert.equal(g[0].calls, 3);
+  assert.equal(g[0].last, true);
+});
+
+test('a running run: the card is on the first reply, nothing else yet', () => {
+  const { R: run } = load();
+  let g = plain(run._groupRuns([U, A(1)]));
+  assert.deepEqual([g[0].host, g[0].final, g[0].hidden], [1, -1, []]);
+  // Results arrived, the next reply is still being written (no call yet): it shows.
+  g = plain(run._groupRuns([U, A(1), R, A(0)]));
+  assert.deepEqual([g[0].host, g[0].final, g[0].hidden], [1, 3, [2]]);
+  // …and once it has a call it goes behind the card.
+  g = plain(run._groupRuns([U, A(1), R, A(1)]));
+  assert.deepEqual([g[0].host, g[0].final, g[0].hidden], [1, -1, [2, 3]]);
+});
+
+test('plain chats are left alone', () => {
+  const { R: run } = load();
+  assert.deepEqual(plain(run._groupRuns([U, A(0), U, A(0)])), []);
+  assert.deepEqual(plain(run._groupRuns([])), []);
+  assert.deepEqual(plain(run._groupRuns([U])), []);
+});
+
+test('an agent nudge and a run whose start scrolled out of the list', () => {
+  const { R: run } = load();
+  let g = plain(run._groupRuns([U, A(0), R, A(1), R, A(0)]));
+  assert.deepEqual([g[0].host, g[0].final, g[0].hidden], [1, 5, [2, 3, 4]]);
+  g = plain(run._groupRuns([R, A(1), R, A(0), U, A(0)]));
+  assert.equal(g.length, 1);
+  assert.deepEqual([g[0].user, g[0].host, g[0].final, g[0].hidden, g[0].last], [-1, 1, 3, [0, 2], false]);
+});
+
+test('two runs in one chat: only the newest is "last"', () => {
+  const { R: run } = load();
+  const g = plain(run._groupRuns([U, A(1), R, A(0), U, A(0), U, A(1), R, A(0)]));
+  assert.deepEqual(g.map((x) => [x.user, x.host, x.final, x.last]), [[0, 1, 3, false], [6, 7, 9, true]]);
+});
+
+const res = (kind, o) => `[SDS:AUTO_MCP_${kind}]\n${JSON.stringify(o)}\n[/SDS:AUTO_MCP_${kind}]`;
+const autoMsg = (...blocks) => '<SuperDeepSeek>\n' + blocks.join('\n\n') + '\n</SuperDeepSeek>';
+
+test('history: calls, results, errors and notes of a run are rebuilt', () => {
+  const { win, R: run } = load();
+  const api = { messageText: win.__sdAgent.messageText, parseTags: win.__sdAgent._parseTags, tagArgs: win.__sdAgent._tagArgs };
+  const msgs = [
+    { message_id: 1, parent_id: null, role: 'USER', content: 'SYSTEM PROMPT\n\nbuild a tiny app' },
+    { message_id: 2, parent_id: 1, role: 'ASSISTANT', fragments: [{ type: 'THINK', content: 'hmm' }, { type: 'RESPONSE', content:
+      'Creating the files.\n<SDS:AUTO:MCP url="sandbox" tool="write_file">{"path":"a.py","content":"print(1)\\n"}</SDS:AUTO:MCP>\n<SDS:AUTO:MCP url="sandbox" tool="run">{"command":"python3 a.py"}</SDS:AUTO:MCP>' }] },
+    { message_id: 3, parent_id: 2, role: 'USER', content: autoMsg(
+      res('RESULT', { serverName: 'sandbox://linux', toolName: 'write_file', call: 'a.py (9 chars)', content: 'Wrote a.py' }),
+      res('ERROR', { serverName: 'sandbox://linux', toolName: 'run', call: 'python3 a.py', error: 'exit 1' })) },
+    { message_id: 4, parent_id: 3, role: 'ASSISTANT', content: 'Fixing.\n<SDS:AUTO:MCP url="sandbox" tool="run">{"command":"python3 a.py"}</SDS:AUTO:MCP>' },
+    { message_id: 5, parent_id: 4, role: 'USER', content: autoMsg(res('RESULT', { serverName: 'sandbox://linux', toolName: 'run', call: 'python3 a.py', content: '1' })) },
+    { message_id: 6, parent_id: 5, role: 'ASSISTANT', content: 'Done: a.py prints 1.' },
+    { message_id: 7, parent_id: 6, role: 'USER', content: 'thanks' },
+    { message_id: 8, parent_id: 7, role: 'ASSISTANT', content: 'You are welcome.' },
+  ];
+  const h = plain(run._historyRuns(msgs, api));
+  assert.equal(h.length, 1);
+  assert.match(h[0].userText, /build a tiny app/);
+  assert.equal(h[0].turns.length, 3);
+  assert.equal(h[0].turns[0].note, 'Creating the files.');
+  assert.deepEqual(h[0].turns[0].calls.map((c) => [c.tool, c.result.error, c.result.content]),
+    [['write_file', false, 'Wrote a.py'], ['run', true, 'exit 1']]);
+  assert.deepEqual(h[0].turns[0].calls[1].args, { command: 'python3 a.py' });
+  assert.equal(h[0].turns[2].note, 'Done: a.py prints 1.');
+  assert.equal(h[0].turns[2].calls.length, 0);
+
+  // Timeline: notes between steps, not the final answer (it is in the chat).
+  const tl = plain(run._timeline({ steps: [] }, h[0]));
+  assert.deepEqual(tl.map((x) => (x.note ? 'note:' + x.note : x.step.tool + ':' + x.step.ok)),
+    ['note:Creating the files.', 'write_file:true', 'run:false', 'note:Fixing.', 'run:true']);
+  assert.equal(tl[1].step.call, 'a.py (9 chars)');
+  assert.match(tl[2].step.input, /"command": "python3 a.py"/);
+});
+
+test('history follows the current branch after a regeneration', () => {
+  const { R: run } = load();
+  const msgs = [
+    { message_id: 1, parent_id: null, role: 'USER', content: 'q' },
+    { message_id: 2, parent_id: 1, role: 'ASSISTANT', content: 'old answer' },
+    { message_id: 3, parent_id: 1, role: 'ASSISTANT', content: 'new answer' },
+  ];
+  assert.deepEqual(plain(run._branch(msgs)).map((m) => m.message_id), [1, 3]);
+  assert.deepEqual(plain(run._branch([{ role: 'USER' }, { role: 'ASSISTANT' }])).length, 2);
+});
+
+test('the rendered run is matched to its history by text, else by position', () => {
+  const { R: run } = load();
+  const h = [{ userText: 'SYS\n\nfirst task please' }, { userText: 'second task' }, { userText: 'third task' }];
+  assert.equal(run._matchRun(h, 'first   task please', 0).userText, h[0].userText);
+  assert.equal(run._matchRun(h, '', 1).userText, 'second task');
+  assert.equal(run._matchRun(h, 'unknown text', 0).userText, 'third task');
+  assert.equal(run._matchRun(h, '', 5), null);
+});
+
+test('live steps carry timings and full output; extra live steps follow the history', () => {
+  const { R: run } = load();
+  const hist = { turns: [{ note: '', calls: [{ tool: 'run', server: 'sandbox://linux', args: { command: 'ls' }, result: { error: false, content: 'a…[cut]…z' } }] }] };
+  const steps = [
+    { tool: 'run', server: 'sandbox://linux', call: 'ls', t0: 1000, t1: 2500, ok: true, output: 'a b c … z (full)', saved: '/tmp/sd-out/x-run.txt' },
+    { tool: 'status', server: 'sandbox://linux', call: '', t0: 3000, t1: 0, ok: null, output: '' },
+  ];
+  const tl = plain(run._timeline({ steps }, hist));
+  assert.equal(tl.length, 2);
+  assert.equal(tl[0].step.ms, 1500);
+  assert.equal(tl[0].step.output, 'a b c … z (full)');
+  assert.equal(tl[0].step.saved, '/tmp/sd-out/x-run.txt');
+  assert.equal(tl[1].step.tool, 'status');
+  assert.equal(tl[1].step.ok, null);
+  // No history at all: the live steps alone.
+  assert.equal(plain(run._timeline({ steps }, null)).length, 2);
+});
+
+test('engine events build the live run', () => {
+  const { win, R: run } = load();
+  win.__sdRunEvent({ phase: 'start', id: 1, server: 'sandbox://linux', tool: 'run', call: 'npm test', args: { command: 'npm test' }, at: 100 });
+  let l = plain(run._live());
+  assert.equal(l.steps.length, 1);
+  assert.equal(l.steps[0].ok, null);
+  win.__sdRunEvent({ phase: 'end', id: 1, ok: false, output: 'x'.repeat(30000), at: 900 });
+  win.__sdRunEvent({ phase: 'end', id: 99, ok: true, at: 950 });   // unknown id: ignored
+  l = plain(run._live());
+  assert.equal(l.steps[0].ok, false);
+  assert.equal(l.steps[0].t1, 900);
+  assert.ok(l.steps[0].output.length < 20100);
+  assert.match(l.steps[0].output, /more characters\]$/);
+  win.__sdRunEvent(null);
+  win.__sdRunEvent({ phase: 'weird' });
+  assert.equal(plain(run._live()).steps.length, 1);
+});
+
+test('card: running shows the current step, the last 3 and Stop; done is one line', () => {
+  const { R: run } = load();
+  const now = Date.now();
+  const s = (tool, call, ok, t0, t1) => ({ tool, call, ok, t0, t1 });
+  const running = plain(run._cardHtml({
+    running: true, stopped: false, count: 5, failed: 1, t0: now - 42000, t1: 0,
+    steps: [s('write_file', 'a.py', true, 1, 2), s('run', 'a', false, 2, 3), s('run', 'b', true, 3, 4), s('run', 'c', true, 4, 5), s('run', '<img src=x onerror=alert(1)>', null, 5, 0)],
+  }));
+  assert.equal(running.state, 'running');
+  assert.match(running.html, /Working/);
+  assert.match(running.html, /5 steps · 4\ds · 1 failed/);
+  assert.match(running.html, /class="sd-run-stop"/);
+  assert.match(running.html, /sd-run-now"><b>run<\/b><span>&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.equal((running.html.match(/<li>/g) || []).length, 3);
+  assert.ok(!running.html.includes('<img'));
+
+  const done = plain(run._cardHtml({ running: false, stopped: false, count: 8, failed: 0, t0: 1000, t1: 73000, steps: [] }));
+  assert.equal(done.state, 'done');
+  assert.match(done.html, /Worked for 1m 12s/);
+  assert.match(done.html, /8 steps/);
+  assert.ok(!done.html.includes('sd-run-stop'));
+  assert.ok(!done.html.includes('<li>'));
+
+  const stopped = plain(run._cardHtml({ running: false, stopped: true, count: 1, failed: 0, t0: 0, t1: 0, steps: [] }));
+  assert.match(stopped.html, /Stopped/);
+  assert.match(stopped.html, /1 step</);
+});
+
+test('card text follows the app language', () => {
+  const { R: run } = load({ lang: 'bn' });
+  const h = plain(run._cardHtml({ running: false, stopped: false, count: 12, failed: 0, t0: 1000, t1: 6000, steps: [] })).html;
+  assert.match(h, /কাজ করেছে ৫সে/);
+  assert.match(h, /১২টি ধাপ/);
+});
+
+test('helpers: results, prose, call summaries, durations', () => {
+  const { R: run } = load();
+  const r = plain(run._parseResults(autoMsg(
+    res('RESULT', { serverName: 's', toolName: 'run', call: 'ls', content: 'x' }),
+    res('ERROR', { serverName: 's', toolName: 'read_file', args: { path: 'p' }, error: 'nope' }),
+    '[SDS:AUTO_MCP_RESULT]\nnot json\n[/SDS:AUTO_MCP_RESULT]')));
+  assert.deepEqual(r.map((x) => [x.error, x.toolName, x.content]), [[false, 'run', 'x'], [true, 'read_file', 'nope'], [false, '', '']]);
+  assert.deepEqual(r[1].args, { path: 'p' });
+  assert.equal(run._stripTags('Plan.\n<SDS:AUTO:MCP url="sandbox" tool="run">{"command":"ls"}</SDS:AUTO:MCP>\n<SDS:AUTO:MCP url="sandbox" tool="status"/>'), 'Plan.');
+  assert.equal(run._stripTags('Half <SDS:AUTO:MCP url="sandbox" tool="run">{"comm'), 'Half');
+  assert.equal(run._callSummary('write_file', { path: 'a', content: 'abc' }), 'a (3 chars)');
+  assert.equal(run._callSummary('edit_file', { path: 'a', old_text: 'x' }), 'a (edit)');
+  assert.equal(run._callSummary('status', {}), '');
+  assert.equal(run._callSummary('x', { call: 'given' }), 'given');
+  assert.equal(run._fmtDur(50), '0.1s');
+  assert.equal(run._fmtDur(12400), '12s');
+  assert.equal(run._fmtDur(3725000), '1h 2m');
+  assert.equal(run._fmtDur(NaN), '');
+});

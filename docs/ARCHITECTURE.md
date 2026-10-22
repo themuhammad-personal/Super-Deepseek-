@@ -77,7 +77,8 @@ Interactions recalculate bound text, formulas, progress and charts locally. Form
 | `StudioSheet.kt` | native | Studio's bottom sheets: slide up, drag down (or fling, tap outside, Back) to dismiss |
 | `ShellProtocol.kt` | native | Studio terminal ↔ shell: end-of-command markers (exit code, folder), Run/Stop state |
 | `sd-agent.js` | engine | Exposes the sandbox to the engine as MCP server `sandbox`, re-reads exact tool arguments from the chat history, the Stop chip, the "ask" mode, continuity (re-scans a finished reply for missed tool calls and nudges a reply that stopped mid-task, at most twice per user message; switchable), the scroll guard (never pulls a reader who scrolled up back to the bottom), the live sandbox state line in the MCP prompt (`promptContext()` ← `AndroidBridge.sandboxContext()`), and the **Linux & Agent** settings page — its own row on the Advanced settings overview (content.js `sdBuildOverview` → page `linux` → `sdMountLinux` → `__sdAgent.mountSettings`, `#sd-linux-page`; prefs `sd_sandbox_enabled` / `sd_sandbox_mode` / `sd_agent_autocontinue`, shared with Linux Studio; the engine language is mirrored to `sd_ui_locale` so Studio follows it) |
-| `sd-sheets.js` | engine | The engine's bottom sheets (+ menu, projects, settings drawer) follow the finger: drag down or fling to dismiss |
+| `sd-run.js` | engine | **One card per agent run** (2.71.0). Groups the chat into runs (a real user message → replies with tool calls ↔ automatic result messages → final reply), hides the automatic messages and the replies in between (`data-sd-run-hidden`, nothing is removed; unrecognised messages are never hidden), mounts one `.sd-run-card` in the first reply in place of its `.bds-mcp-loading` cards (live step, last 3 steps, Stop while running; "Worked for … · N steps" when done) and opens the activity drawer `#sd-run-sheet` (every step: where, input, output, time, saved path, plus the model's notes in between). Live data: `window.__sdRunEvent` (start/end per call, from content.js `sdMcpOne`); timings are remembered per run in `localStorage` `sd_run_v1`; details of older runs come from the chat history (`__sdAgent.history()`). Kill switch: `localStorage.sd_run_off = '1'` / `__sdRun.setEnabled(false)` |
+| `sd-sheets.js` | engine | The engine's bottom sheets (+ menu, projects, settings drawer) follow the finger: drag down or fling to dismiss. Our own sheets (`ours: true`: the agent's confirm / step-cap sheet, the run drawer) are closed by Back without leaving the chat |
 
 The engine does the agent loop itself: the model writes
 `<SDS:AUTO:MCP url="sandbox" tool="run">{…}</SDS:AUTO:MCP>`, the engine calls the tool and
@@ -200,3 +201,17 @@ Full protocol and threat model: [genui/PROTOCOL.md](genui/PROTOCOL.md).
 
 The APK's only web assets are the engine files staged from `android/app/src/main/bds-assets/bds`;
 the official site is the chat surface. (The earlier React SPA was removed in 2.50.)
+
+## Token savers of the agent loop (2.71.0)
+
+Every agent step is still one hidden DeepSeek web turn (there is no other way
+on the web app), so 2.71.0 shrinks what each turn carries:
+
+| | Where | What |
+|---|---|---|
+| T1 | content.js `sdMcpOne` | Results carry `call` (a ≤300-char summary: the command, or the path + size) instead of echoing the full `args` (a `write_file` used to send its whole content back) |
+| T2/T3 | content.js `sdHT`, sd-agent.js `__sdSaveOutput` | An output over `mcpInlineMaxChars` (8000) keeps its head (40%) and tail (60%); the full text is saved in the sandbox at `/tmp/sd-out/<id>-<tool>.txt` through the unwrapped bridge and the model is told to `read_file` the part it needs. Not saved (old behaviour, file attachment) when Linux is not installed, in "ask" mode, for `read_file`, after Stop, or when the write fails / takes over 8 s |
+| T4 | injected.js `I()` | Automatic messages (`[SDS:AUTO` / `[BDS:AUTO`) do not advance the injection counter and get no injected context (system prompt, memories, project RAG, skills, GenUI hints) |
+| T5 | sd-agent.js `RUN_RULES` | One rule line in the tool instructions: short prose between calls, read saved outputs instead of re-running |
+| T6 | sd-agent.js `capGate` | After every 25 tool calls of one instruction the user is asked whether to continue (Stop = Back = the first button) |
+

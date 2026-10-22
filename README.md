@@ -195,6 +195,7 @@ Android app (Kotlin)
  │          injected.js   network layer: context, memory, tool results
  │          content.js    UI: settings, commands, cards, tool runner
  │          sd-agent.js   the agent: Linux tools, Stop, keep-going, scroll guard
+ │          sd-run.js     one card per agent run + the activity drawer
  │          sd-sheets.js  draggable sheets and drawers
  ├─ AndroidBridge ⇄ storage, pickers, downloads, haptics, updates, sandbox
  └─ Linux sandbox: proot + Alpine (/root/workspace) · Linux Studio · foreground service

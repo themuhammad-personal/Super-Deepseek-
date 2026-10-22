@@ -1,7 +1,7 @@
 {
   "name": "super-deepseek",
   "private": true,
-  "version": "2.70.1",
+  "version": "2.71.0",
   "description": "Super DeepSeek — Claude-class native client for DeepSeek (Android + Generative UI engine)",
   "license": "MIT",
   "type": "module",

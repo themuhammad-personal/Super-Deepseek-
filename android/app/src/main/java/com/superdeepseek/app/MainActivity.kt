@@ -855,9 +855,9 @@ class MainActivity : ComponentActivity() {
     private var readyPollRunning = false
 
     private companion object {
-        /** Native engine modules, in load order (GenUI: protocol → svg → prompt → host → renderer → visuals → artifacts → panel). */
+        /** Native engine modules, in load order (sd-run after sd-agent: it uses its history API; GenUI: protocol → svg → prompt → host → renderer → visuals → artifacts → panel). */
         val NATIVE_MODULES = listOf(
-            "sd-native.js", "sd-files.js", "sd-agent.js", "sd-sheets.js",
+            "sd-native.js", "sd-files.js", "sd-agent.js", "sd-run.js", "sd-sheets.js",
             "sd-genui-protocol.js", "sd-genui-svg.js", "sd-genui-prompt.js", "sd-genui-host.js",
             "sd-genui-frame.js", "sd-genui.js", "sd-genui-viewer.js", "sd-genui-inline.js",
             "sd-genui-visuals.js", "sd-artifacts.js", "sd-genui-mcp.js", "sd-genui-panel.js"
