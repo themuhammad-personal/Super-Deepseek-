@@ -2133,12 +2133,13 @@ class WebViewBridge(
 
             val resultJson: JSONObject = if (sse) {
                 val msg = resp.body?.charStream()?.buffered()?.use { McpSse.readResponse(it, body.opt("id"), McpSse.MAX_RESPONSE_CHARS) }
-                if (msg != null && msg.has("error")) {
+                    ?: throw McpServerError("MCP server did not return a matching JSON-RPC response")
+                if (msg.has("error")) {
                     val errObj = msg.optJSONObject("error")
                     val errMsg = errObj?.optString("message") ?: msg.optString("error")
                     throw McpServerError("MCP error: $errMsg")
                 }
-                when (val resVal = msg?.opt("result")) {
+                when (val resVal = msg.opt("result")) {
                     null -> JSONObject()
                     is JSONObject -> resVal
                     else -> JSONObject().put("value", resVal)
