@@ -106,6 +106,18 @@
    */
   function rawCallCount(text) {
     var s = String(text || '');
+    // Reuse the agent's quote-aware protocol parser when available. It skips
+    // tag-looking text inside a call body and handles incomplete streamed calls.
+    try {
+      var api = window.__sdAgent;
+      if (api && typeof api._parseTags === 'function') {
+        var tags = api._parseTags(s) || [];
+        return tags.filter(function (tag) {
+          var attrs = tag && tag.attrs || {};
+          return attrs.tool != null || attrs.toolName != null;
+        }).length;
+      }
+    } catch (_) {}
     var re = /<[BS]DS:(?:AUTO:)?MCP\b/gi;
     var m, count = 0;
     while ((m = re.exec(s))) {
