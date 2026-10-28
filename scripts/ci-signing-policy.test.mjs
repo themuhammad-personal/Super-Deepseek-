@@ -17,7 +17,8 @@ test('CI runs connected Android tests across the stability-plan API matrix', () 
   assert.ok(workflow.includes('Enable KVM for hardware-accelerated emulator'));
   assert.ok(workflow.includes('api-level: [30, 34, 35]'));
   assert.ok(workflow.includes('api-level: ${{ matrix.api-level }}'));
-  assert.ok(workflow.includes("script: bash -o pipefail -c 'cd android && ./gradlew --no-daemon connectedDebugAndroidTest --stacktrace --info"));
+  assert.ok(workflow.includes("./gradlew --no-daemon connectedDebugAndroidTest --stacktrace --info 2>&1 | tee /tmp/android-instrumented.log"));
+  assert.ok(workflow.includes("echo \"::error::$line\""));
   assert.ok(workflow.includes('Summarize Android instrumentation result'));
   assert.ok(workflow.includes('tail -180 /tmp/android-instrumented.log'));
   assert.ok(workflow.includes('name: android-instrumented-test-reports'));

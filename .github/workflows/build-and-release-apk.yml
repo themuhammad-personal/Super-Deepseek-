@@ -285,7 +285,13 @@ jobs:
           profile: pixel_2
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: bash -o pipefail -c 'cd android && ./gradlew --no-daemon connectedDebugAndroidTest --stacktrace --info 2>&1 | tee /tmp/android-instrumented.log'
+          script: |
+            if ! bash -o pipefail -c 'cd android && ./gradlew --no-daemon connectedDebugAndroidTest --stacktrace --info 2>&1 | tee /tmp/android-instrumented.log'; then
+              grep -E 'FAILURES|Tests run:|FAILED|Exception|Assertion|Expected:|Actual:|INSTRUMENTATION_STATUS|Error in |Process:' /tmp/android-instrumented.log | tail -80 | while IFS= read -r line; do
+                echo "::error::$line"
+              done
+              exit 1
+            fi
       - name: Summarize Android instrumentation result
         if: always()
         run: |
