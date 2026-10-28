@@ -15,7 +15,7 @@ const HELPER = fs.readFileSync(
 );
 const marker = 'internal val DEEPSEEK_PAGE_SURFACE_PROBE_JS = """';
 const markerAt = HELPER.indexOf(marker);
-const bodyAt = markerAt < 0 ? -1 : HELPER.indexOf('\\n', markerAt) + 1;
+const bodyAt = markerAt < 0 ? -1 : markerAt + marker.length;
 const endAt = bodyAt < 0 ? -1 : HELPER.indexOf('""".trimIndent()', bodyAt);
 assert.ok(markerAt >= 0 && bodyAt > 0 && endAt > bodyAt, 'DEEPSEEK_PAGE_SURFACE_PROBE_JS must stay extractable for contract tests');
 const PROBE = HELPER.slice(bodyAt, endAt).trim();
