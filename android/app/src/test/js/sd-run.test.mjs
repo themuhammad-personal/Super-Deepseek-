@@ -67,6 +67,32 @@ test('a running run: the card is on the first reply, nothing else yet', () => {
   assert.deepEqual([g[0].host, g[0].final, g[0].hidden], [1, -1, [2, 3]]);
 });
 
+test('raw MCP calls count as run steps and automatic results ignore DOM role mismatches', () => {
+  const { R: run } = load();
+  const raw = '<SDS:AUTO:MCP url="sandbox" tool="run">{"command":"ls"}</SDS:AUTO:MCP>';
+  assert.equal(run._rawCallCount(raw), 1);
+  assert.equal(run._rawCallCount('ordinary assistant prose'), 0);
+  const message = plain(run._classifyMessage('assistant', raw, 0, false));
+  assert.deepEqual(message, { role: 'assistant', auto: false, calls: 1 });
+
+  const result = '<SuperDeepSeek>\n[SDS:AUTO] MCP Result for run @ sandbox://linux\n' +
+    '[SDS:AUTO_MCP_RESULT]\n{"toolName":"run","content":"ok"}\n' +
+    '[/SDS:AUTO_MCP_RESULT]\n</SuperDeepSeek>';
+  const auto = plain(run._classifyMessage('assistant', result, 0, false));
+  assert.deepEqual(auto, { role: 'user', auto: true, calls: 0 });
+
+  const g = plain(run._groupRuns([
+    { role: 'user', auto: false, calls: 0 },
+    message,
+    auto,
+    { role: 'assistant', auto: false, calls: 0 },
+  ]));
+  assert.equal(g.length, 1);
+  assert.equal(g[0].calls, 1);
+  assert.deepEqual(g[0].hidden, [2]);
+  assert.equal(g[0].final, 3);
+});
+
 test('plain chats are left alone', () => {
   const { R: run } = load();
   assert.deepEqual(plain(run._groupRuns([U, A(0), U, A(0)])), []);
