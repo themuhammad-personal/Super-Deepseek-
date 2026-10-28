@@ -55,28 +55,41 @@ test('published release still requires permanent signing material, never a test 
 
 test('trusted publishing refs protect the permanent signer and treat tags as data', () => {
   const trustedPublishCondition = "if: (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) || (github.event_name == 'workflow_dispatch' && inputs.publish == true && github.ref == 'refs/heads/main')";
-  const permanentKey = workflow.match(/- name: Prepare permanent release signing key([\\s\\S]*?)(?=\\n      - name: Prepare temporary signing key)/)?.[1];
-  assert.ok(permanentKey?.includes(trustedPublishCondition),
+
+  const permanentKeyStart = workflow.indexOf('- name: Prepare permanent release signing key');
+  const temporaryKeyStart = workflow.indexOf('- name: Prepare temporary signing key', permanentKeyStart);
+  const permanentKey = workflow.slice(permanentKeyStart, temporaryKeyStart);
+  assert.ok(permanentKeyStart >= 0 && temporaryKeyStart > permanentKeyStart && permanentKey.includes(trustedPublishCondition),
     'permanent signing must independently enforce the trusted-event/ref condition');
-  const apkGate = workflow.match(/- name: Gate publishable APK identity, checksum, signature, and sandbox([\\s\\S]*?)(?=\\n      - name: Upload APK Artifact)/)?.[1];
-  assert.ok(apkGate?.includes(trustedPublishCondition),
-    'the publishable APK gate must independently enforce the trusted-event/ref condition');
-  const releaseJob = workflow.match(/\\n  release:([\\s\\S]*)$/)?.[1];
-  assert.ok(releaseJob?.includes(trustedPublishCondition),
+
+  const apkGateStart = workflow.indexOf('- name: Gate publishable APK identity, checksum, signature, and sandbox');
+  const uploadApkStart = workflow.indexOf('- name: Upload APK Artifact', apkGateStart);
+  const apkGate = workflow.slice(apkGateStart, uploadApkStart);
+  assert.ok(apkGateStart >= 0 && uploadApkStart > apkGateStart && apkGate.includes(trustedPublishCondition),
+    'the APK gate must independently enforce the trusted-event/ref condition');
+
+  const releaseStart = workflow.indexOf('  release:');
+  const releaseJob = workflow.slice(releaseStart);
+  assert.ok(releaseStart >= 0 && releaseJob.includes(trustedPublishCondition),
     'the release job itself must block PR and untrusted-ref publication');
-
-  assert.match(workflow, /^permissions:\s*\n  contents: read$/m,
+  assert.ok(workflow.includes('permissions:\\n  contents: read'),
     'build and test jobs must receive only read access to repository contents');
-  assert.match(releaseJob, /permissions:\s*\n      contents: write/,
+  assert.ok(releaseJob.includes('permissions:\\n      contents: write'),
     'write access must be scoped to the release-publishing job');
-  const historyGuard = workflow.match(/- name: Verify release commit is on trusted main history([\s\S]*?)(?=\n      - name: Prepare permanent release signing key)/)?.[1];
-  assert.ok(historyGuard, 'tag/manual release history must be checked before secrets are exposed');
-  assert.match(historyGuard, /git merge-base --is-ancestor "\$GITHUB_SHA" FETCH_HEAD/);
 
-  const releaseConfig = workflow.match(/- id: rel_cfg([\s\S]*?)(?=\n      - uses: softprops\/action-gh-release@v3)/)?.[1];
-  assert.ok(releaseConfig, 'release configuration step must exist');
-  assert.match(releaseConfig, /if \[\[ "\$GITHUB_REF" == refs\/tags\/v\* \]\]/);
-  assert.doesNotMatch(releaseConfig, /github\.(?:ref|ref_name)/,
+  const historyGuardStart = workflow.indexOf('- name: Verify release commit is on trusted main history');
+  const historyGuardEnd = workflow.indexOf('- name: Prepare permanent release signing key', historyGuardStart);
+  const historyGuard = workflow.slice(historyGuardStart, historyGuardEnd);
+  assert.ok(historyGuardStart >= 0 && historyGuardEnd > historyGuardStart && historyGuard.includes('git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD'),
+    'tag/manual release history must be checked before secrets are exposed');
+
+  const releaseConfigStart = workflow.indexOf('- id: rel_cfg');
+  const releaseActionStart = workflow.indexOf('- uses: softprops/action-gh-release@v3', releaseConfigStart);
+  const releaseConfig = workflow.slice(releaseConfigStart, releaseActionStart);
+  assert.ok(releaseConfigStart >= 0 && releaseActionStart > releaseConfigStart, 'release configuration step must exist');
+  assert.ok(releaseConfig.includes('if [[ "$GITHUB_REF" == refs/tags/v* ]]'),
+    'tag checks must use environment data instead of interpolating ref text into shell source');
+  assert.ok(!releaseConfig.includes('github.ref') && !releaseConfig.includes('github.ref_name'),
     'untrusted ref values must not be interpolated into shell source');
 });
 test('README and build notes do not freeze changing Chromium acceptance totals', () => {
