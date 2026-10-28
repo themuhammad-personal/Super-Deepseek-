@@ -16,7 +16,7 @@ test('CI runs connected Android tests on an API 35 emulator', () => {
   assert.ok(workflow.includes('uses: reactivecircus/android-emulator-runner@v2'));
   assert.ok(workflow.includes('Enable KVM for hardware-accelerated emulator'));
   assert.ok(workflow.includes('api-level: 35'));
-  assert.ok(workflow.includes('./gradlew --no-daemon connectedDebugAndroidTest --stacktrace --info'));
+  assert.ok(workflow.includes("script: bash -o pipefail -c 'cd android && ./gradlew --no-daemon connectedDebugAndroidTest --stacktrace --info"));
   assert.ok(workflow.includes('name: android-instrumented-test-reports'));
   assert.ok(workflow.includes('cp -r android/app/src/main/bds-assets/bds android/app/src/main/assets/bds'));
 });
