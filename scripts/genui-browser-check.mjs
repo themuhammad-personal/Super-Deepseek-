@@ -252,7 +252,7 @@ try {
     await page.evaluate(() => {
       const md = fx.message();
       window.__streamBadMd = md;
-      fx.block(md, 'sds-genui', 'id: My-Widget\nkind: svg\ntitle: Streaming broken SVG\n---\nnot an svg document');
+      fx.block(md, 'sds-genui', 'id: My-Widget\nkind: svg\ntitle: Streaming broken SVG\n---\n');
     });
     const busy = page.locator('.sd-art.sd-art-busy');
     await busy.waitFor({ timeout: 4000 });
@@ -262,7 +262,40 @@ try {
     const card = page.locator('.sd-art[data-kind="code"]').filter({ hasText: 'Streaming broken SVG' });
     await card.waitFor({ timeout: 7000 });
     await page.locator('#sd-viewer .sd-code').waitFor({ timeout: 5000 });
-    assert.match(await page.locator('#sd-viewer .sd-code').textContent() || '', /not an svg document/);
+    assert.match(await page.locator('#sd-viewer .sd-code').textContent() || '', /Streaming broken SVG/);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
+
+  await test('02i preview circuit resets when Generative UI is toggled off and on', async () => {
+    const { ctx, page, errors } = await fresh();
+    await page.evaluate(() => {
+      const md = fx.message();
+      window.__savedGenUIForReset = window.__sdGenUI;
+      delete window.__sdGenUI;
+      for (let i = 0; i < 5; i++) {
+        fx.classic(md, 'sds-genui', JSON.stringify({
+          version: 1, id: 'breaker-' + i, kind: 'ui', title: 'Broken Preview ' + i,
+          payload: { spec: { version: 1, components: [] } }
+        }));
+      }
+      fx.para(md, 'finish broken preview batch');
+    });
+    await page.locator('.sd-art[data-kind="code"]').nth(4).waitFor({ timeout: 7000 });
+    await page.evaluate(() => {
+      const P = window.__sdGenUIPrompt;
+      P.setConfig({ enabled: false });
+      window.__sdGenUI = window.__savedGenUIForReset;
+      P.setConfig({ enabled: true });
+      const md = fx.message();
+      fx.classic(md, 'sds-genui', JSON.stringify({
+        version: 1, id: 'after-reset', kind: 'html-app', title: 'After Reset',
+        payload: { html: '<!doctype html><html><head><title>After Reset</title></head><body><h1>Ready</h1></body></html>' }
+      }));
+      fx.para(md, 'finish after reset');
+    });
+    await page.locator('.sd-art[data-kind="html-app"]').filter({ hasText: 'After Reset' }).waitFor({ timeout: 7000 });
+    assert.equal(await page.locator('.sd-art[data-kind="code"]').filter({ hasText: 'After Reset' }).count(), 0, 're-enabled GenUI should render a valid artifact normally');
     assert.deepEqual(errors, []);
     await ctx.close();
   });
