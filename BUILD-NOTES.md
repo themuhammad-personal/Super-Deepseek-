@@ -1,6 +1,10 @@
-# Build instructions (Super DeepSeek 2.70 — Generative UI)
+# Build instructions (Super DeepSeek 2.71 — one card per agent run)
 
 Toolchain: JDK 17, Android SDK platform 34 + build-tools 34.0.0, Node 20+ (22 in CI).
+The version lives in `package.json` and in `android/app/build.gradle.kts`
+(`versionName`; `versionCode` is `major*1e6 + minor*1e4 + patch*1e3 + CI build id`).
+`npm run test:engine` fails if the two disagree or if a release bump skips the
+versionCode step — see `repo-consistency.test.mjs`.
 
 1. `npm ci`
 2. `npm test`                         — engine unit tests + compliance-harness self-test
