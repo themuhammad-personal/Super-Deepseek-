@@ -292,7 +292,7 @@
       try { if (root.navigator.clipboard && root.navigator.clipboard.writeText) root.navigator.clipboard.writeText(text).then(ok, legacy); else legacy(); } catch (_) { legacy(); }
     });
   }
-  var EXT_FAMILY = { md:'markdown',markdown:'markdown',js:'javascript',javascript:'javascript',ts:'typescript',typescript:'typescript',py:'python',python:'python',kt:'kotlin',kotlin:'kotlin',sh:'shell',bash:'shell',shell:'shell',yaml:'yaml',yml:'yaml',gql:'graphql',graphql:'graphql',proto:'protobuf',protobuf:'protobuf',ps1:'powershell',powershell:'powershell',pl:'perl',perl:'perl',hs:'haskell',haskell:'haskell',ex:'elixir',elixir:'elixir' };
+  var EXT_FAMILY = { md:'markdown',markdown:'markdown',js:'javascript',javascript:'javascript',ts:'typescript',typescript:'typescript',py:'python',python:'python',kt:'kotlin',kotlin:'kotlin',sh:'shell',bash:'shell',shell:'shell',yaml:'yaml',yml:'yaml',gql:'graphql',graphql:'graphql',proto:'protobuf',protobuf:'protobuf',ps1:'powershell',powershell:'powershell',pl:'perl',perl:'perl',hs:'haskell',haskell:'haskell',ex:'elixir',elixir:'elixir',csv:'csv',tsv:'tsv',json:'json',jsonl:'jsonl',json5:'json5',toml:'toml',ini:'ini',xml:'xml',html:'html',htm:'html',css:'css',sql:'sql',ipynb:'ipynb',dockerfile:'dockerfile',makefile:'makefile',env:'env',properties:'properties',conf:'conf',gradle:'gradle',kts:'kts',diff:'diff',log:'log',txt:'txt',pdf:'pdf',docx:'docx',xlsx:'xlsx',pptx:'pptx' };
   var SAFE_EXT = /^[A-Za-z0-9][A-Za-z0-9_-]{0,15}$/;
   function fileName(title, ext) {
     var raw = String(title || 'artifact').trim(), extension = String(ext || 'txt').replace(/^\./, '').toLowerCase() || 'txt';

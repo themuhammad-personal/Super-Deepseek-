@@ -135,6 +135,7 @@ test('viewer: describe/sourceOf/frameKind cover every artifact kind', () => {
   assert.equal(V.fileName('README.md', 'md'), 'README.md');
   assert.equal(V.fileName('notes.markdown', 'md'), 'notes.markdown');
   assert.equal(V.fileName('my.data.csv', 'csv'), 'my.data.csv');
+  assert.equal(V.fileName('MY.DATA.CSV', 'csv'), 'MY.DATA.CSV');
   assert.equal(V.fileName('Quarterly Report', 'csv'), 'Quarterly Report.csv');
   assert.equal(V.fileName('config.pdf', 'md'), 'config.md');
   assert.equal(V.fileName('Node.js', 'js'), 'Node.js');
