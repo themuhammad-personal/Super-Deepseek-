@@ -67,6 +67,185 @@ test('a running run: the card is on the first reply, nothing else yet', () => {
   assert.deepEqual([g[0].host, g[0].final, g[0].hidden], [1, -1, [2, 3]]);
 });
 
+test('raw MCP calls count as run steps and automatic results ignore DOM role mismatches', () => {
+  const { R: run } = load();
+  const raw = '<SDS:AUTO:MCP url="sandbox" tool="run">{"command":"ls"}</SDS:AUTO:MCP>';
+  assert.equal(run._rawCallCount(raw), 1);
+  assert.equal(run._rawCallCount('ordinary assistant prose'), 0);
+  const message = plain(run._classifyMessage('assistant', raw, 0, false));
+  assert.deepEqual(message, { role: 'assistant', auto: false, calls: 1 });
+
+  const result = '<SuperDeepSeek>\n[SDS:AUTO] MCP Result for run @ sandbox://linux\n' +
+    '[SDS:AUTO_MCP_RESULT]\n{"toolName":"run","content":"ok"}\n' +
+    '[/SDS:AUTO_MCP_RESULT]\n</SuperDeepSeek>';
+  const auto = plain(run._classifyMessage('assistant', result, 0, false));
+  assert.deepEqual(auto, { role: 'user', auto: true, calls: 0 });
+
+  const g = plain(run._groupRuns([
+    { role: 'user', auto: false, calls: 0 },
+    message,
+    auto,
+    { role: 'assistant', auto: false, calls: 0 },
+  ]));
+  assert.equal(g.length, 1);
+  assert.equal(g[0].calls, 1);
+  assert.deepEqual(g[0].hidden, [2]);
+  assert.equal(g[0].final, 3);
+});
+
+test('raw call spans support name= and preserve prose around a call', () => {
+  const { win, R: run } = load();
+  const raw = 'I will execute it: <SDS:AUTO:MCP url="sandbox" ' +
+    'name="run">{"command":"echo one"}</SDS:AUTO:MCP> done.';
+  const spans = plain(run._findRawCallSpans(raw));
+  assert.equal(spans.length, 1);
+  assert.equal(raw.slice(spans[0].start, spans[0].end),
+    '<SDS:AUTO:MCP url="sandbox" name="run">{"command":"echo one"}</SDS:AUTO:MCP>');
+  assert.equal(run._rawCallCount('<SDS:AUTO:MCP name="run"/>'), 1);
+  assert.equal(raw.slice(0, spans[0].start), 'I will execute it: ');
+  assert.equal(raw.slice(spans[0].end), ' done.');
+
+  const text = (value) => {
+    const n = { nodeType: 3, nodeValue: value, parentNode: null };
+    Object.defineProperty(n, 'textContent', { get() { return this.nodeValue; } });
+    n.splitText = function (offset) {
+      const tail = text(this.nodeValue.slice(offset));
+      this.nodeValue = this.nodeValue.slice(0, offset);
+      const siblings = this.parentNode.childNodes;
+      siblings.splice(siblings.indexOf(this) + 1, 0, tail);
+      tail.parentNode = this.parentNode;
+      return tail;
+    };
+    return n;
+  };
+  const el = (tag, children = []) => {
+    const node = {
+      nodeType: 1, tagName: tag, id: '', parentNode: null, childNodes: [], attrs: {},
+      classList: { contains: () => false },
+      hasAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attrs, name); },
+      setAttribute(name, value) { this.attrs[name] = value; },
+      removeAttribute(name) { delete this.attrs[name]; },
+      querySelectorAll: () => [],
+      appendChild(child) { child.parentNode = this; this.childNodes.push(child); return child; },
+      replaceChild(next, old) {
+        const i = this.childNodes.indexOf(old);
+        if (i < 0) throw new Error('old child not found');
+        this.childNodes[i] = next; next.parentNode = this; old.parentNode = null; return old;
+      },
+      insertBefore(next, ref) {
+        // Validate the reference before any no-op or node move, as the DOM does.
+        const i = this.childNodes.indexOf(ref);
+        if (i < 0) throw new Error('reference child not found');
+        if (next === ref) return next;
+        const oldParent = next.parentNode;
+        if (oldParent && Array.isArray(oldParent.childNodes)) {
+          const oldIndex = oldParent.childNodes.indexOf(next);
+          if (oldIndex >= 0) oldParent.childNodes.splice(oldIndex, 1);
+        }
+        const destinationIndex = this.childNodes.indexOf(ref);
+        this.childNodes.splice(destinationIndex, 0, next);
+        next.parentNode = this;
+        return next;
+      },
+      removeChild(child) {
+        const i = this.childNodes.indexOf(child);
+        if (i >= 0) this.childNodes.splice(i, 1);
+        child.parentNode = null; return child;
+      },
+    };
+    Object.defineProperty(node, 'textContent', { get() { return this.childNodes.map(c => c.textContent).join(''); } });
+    Object.defineProperty(node, 'firstChild', { get() { return this.childNodes[0] || null; } });
+    children.forEach(child => node.appendChild(child));
+    return node;
+  };
+  // A tool tag split across sibling paragraphs, with ordinary text on both sides
+  // and a fenced code example that must not be hidden or counted.
+  const first = el('P', [text(' <SDS:AUTO:MCP url="sandbox" ')]);
+  const second = el('P', [text('name="run">{"command":"ls"}</SDS:AUTO:MCP> ')]);
+  const before = text('Before. ');
+  const after = text('After.');
+  const example = el('PRE', [text('<SDS:AUTO:MCP url="sandbox" tool="example"/>')]);
+  const host = el('DIV', [before, first, second, after, example]);
+  host.querySelectorAll = () => [];
+  win.document.createElement = (tag) => el(tag.toUpperCase());
+
+  // Fake insertBefore should not mutate the DOM when validation fails or when
+  // a node is inserted immediately before itself.
+  const destination = el('DIV', [text('keep'), text('ref')]);
+  const movingParent = el('DIV', [text('move')]);
+  const moving = movingParent.firstChild;
+  const invalidRef = el('P', [text('not a destination child')]);
+  const beforeInvalid = movingParent.textContent;
+  assert.throws(() => destination.insertBefore(moving, invalidRef), /reference child not found/);
+  assert.equal(movingParent.textContent, beforeInvalid);
+  assert.equal(movingParent.firstChild, moving);
+  assert.throws(() => destination.insertBefore(invalidRef, invalidRef), /reference child not found/);
+  const firstDestinationNode = destination.firstChild;
+  assert.equal(destination.insertBefore(firstDestinationNode, firstDestinationNode), firstDestinationNode);
+  assert.equal(destination.firstChild, firstDestinationNode);
+  assert.equal(destination.textContent, 'keepref');
+  assert.equal(run._protocolText(host), 'Before.  <SDS:AUTO:MCP url="sandbox" name="run">{"command":"ls"}</SDS:AUTO:MCP> After.');
+  assert.equal(run._protocolText(el('DIV', [example])), '', 'fenced code-only examples are excluded from protocol detection');
+  const hidden = new Set();
+  run._hideRawCallBlocks(host, hidden);
+  assert.equal(hidden.size, 2, 'both DOM text segments of the split call are wrapped');
+  assert.equal(host.textContent, 'Before.  <SDS:AUTO:MCP url="sandbox" name="run">{"command":"ls"}</SDS:AUTO:MCP> After.<SDS:AUTO:MCP url="sandbox" tool="example"/>');
+  assert.equal([...hidden].every(n => n.hasAttribute('data-sd-run-raw-hidden')), true);
+  hidden.forEach(n => run._restoreHiddenRawNode(n));
+  assert.equal(host.textContent, 'Before.  <SDS:AUTO:MCP url="sandbox" name="run">{"command":"ls"}</SDS:AUTO:MCP> After.<SDS:AUTO:MCP url="sandbox" tool="example"/>');
+  assert.equal(first.childNodes.filter(n => n.tagName === 'SPAN').length, 0, 'restore unwraps first paragraph spans');
+  assert.equal(second.childNodes.filter(n => n.tagName === 'SPAN').length, 0, 'restore unwraps second paragraph spans');
+});
+
+test('MCP span parser rejects quoted fake attributes and separates incomplete calls', () => {
+  const { R: run } = load();
+  const quoted = '<SDS:AUTO:MCP url="sandbox" note="tool=run"/>';
+  assert.equal(run._rawCallCount(quoted), 0, 'quoted text is not an attribute');
+  const first = '<SDS:AUTO:MCP url="sandbox" tool="run">partial output';
+  assert.equal(run._rawCallCount(first), 1);
+  assert.deepEqual(plain(run._findRawCallSpans(first)), [{ start: 0, end: first.length }]);
+
+  const second = '<SDS:AUTO:MCP url="sandbox" name="job">done</SDS:AUTO:MCP>';
+  const both = first + second;
+  const spans = plain(run._findRawCallSpans(both));
+  assert.equal(spans.length, 2);
+  assert.equal(both.slice(spans[0].start, spans[0].end), first);
+  assert.equal(both.slice(spans[1].start, spans[1].end), second);
+});
+
+test('encoded closing-tag text inside a call body does not terminate the span', () => {
+  const { R: run } = load();
+  // This is what textContent exposes after the browser decodes &lt; and &gt;.
+  const raw = '<SDS:AUTO:MCP url="sandbox" tool="write_file">' +
+    '{"content":"literal </SDS:AUTO:MCP> text"}</SDS:AUTO:MCP>';
+  const spans = plain(run._findRawCallSpans(raw));
+  assert.equal(spans.length, 1);
+  assert.equal(raw.slice(spans[0].start, spans[0].end), raw);
+});
+
+test('assistant examples and filenames are not automatic results without the protocol envelope', () => {
+  const { R: run } = load();
+  assert.equal(run._isAutoUserText('Final: saved as mcp_results_run.txt', 'assistant'), false);
+  assert.equal(run._isAutoUserText('Example marker [SDS:AUTO_MCP_RESULT]', 'assistant'), false);
+  assert.equal(run._isAutoUserText('[SDS:AUTO_MCP_RESULT]{"content":"ok"}[/SDS:AUTO_MCP_RESULT]', 'assistant'), false);
+  assert.equal(run._isAutoUserText('<SuperDeepSeek>\n[SDS:AUTO] MCP Result for run @ sandbox\n' +
+    '[SDS:AUTO_MCP_RESULT]\n{"content":"ok"}\n[/SDS:AUTO_MCP_RESULT]\n</SuperDeepSeek>', 'assistant'), true);
+  assert.equal(run._isAutoUserText('<BetterDeepSeek>\n[BDS:AUTO] MCP Result for run @ sandbox\n' +
+    '[BDS:AUTO_MCP_RESULT]\n{"content":"ok"}\n[/BDS:AUTO_MCP_RESULT]\n</BetterDeepSeek>', 'assistant'), true);
+});
+
+test('filename fallback applies only to user messages, not assistant prose', () => {
+  const { R: run } = load();
+  assert.deepEqual(plain(run._classifyMessage('assistant', 'The full output is in mcp_results_run.txt.', 0, false)),
+    { role: 'assistant', auto: false, calls: 0 });
+  assert.deepEqual(plain(run._classifyMessage('user', 'mcp_results_run.txt', 0, false)),
+    { role: 'user', auto: true, calls: 0 });
+  const result = '<SuperDeepSeek>\n[SDS:AUTO] MCP Result for run @ sandbox\n' +
+    '[SDS:AUTO_MCP_RESULT]\n{"content":"ok"}\n[/SDS:AUTO_MCP_RESULT]\n</SuperDeepSeek>';
+  assert.deepEqual(plain(run._classifyMessage('assistant', result, 0, false)),
+    { role: 'user', auto: true, calls: 0 });
+});
+
 test('plain chats are left alone', () => {
   const { R: run } = load();
   assert.deepEqual(plain(run._groupRuns([U, A(0), U, A(0)])), []);
