@@ -118,16 +118,18 @@ android {
 }
 
 dependencies {
-    // Pinned to the newest releases lint reports (see the Lint job). androidx.webkit matters
-    // most here: this app IS a WebView, so its fixes are the app's fixes.
-    implementation("androidx.core:core-ktx:1.19.1")
-    implementation("androidx.core:core-splashscreen:1.2.0")
-    implementation("androidx.appcompat:appcompat:1.8.0")
-    implementation("androidx.activity:activity-ktx:1.13.0")
-    implementation("androidx.webkit:webkit:1.18.0")
-    implementation("androidx.documentfile:documentfile:1.1.0")
+    // Deliberately NOT the newest releases lint offers (core-ktx 1.19.1, webkit 1.18.0, …):
+    // those AARs require compileSdk 37, and AGP 8.13 tops out at API 36.1. They come back
+    // when the project moves to AGP 9.x. These are the newest lines that still build on
+    // compileSdk 36; androidx.webkit matters most, because this app IS a WebView.
+    implementation("androidx.core:core-ktx:1.16.0")
+    implementation("androidx.core:core-splashscreen:1.0.1")
+    implementation("androidx.appcompat:appcompat:1.7.1")
+    implementation("androidx.activity:activity-ktx:1.10.1")
+    implementation("androidx.webkit:webkit:1.14.0")
+    implementation("androidx.documentfile:documentfile:1.0.1")
 
-    implementation("com.google.android.material:material:1.14.0")
+    implementation("com.google.android.material:material:1.12.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     testImplementation("junit:junit:4.13.2")

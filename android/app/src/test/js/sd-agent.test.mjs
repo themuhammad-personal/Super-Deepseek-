@@ -647,3 +647,22 @@ test('history of the open chat is available to the run drawer', async () => {
   const off = load({ href: 'https://chat.deepseek.com/' });
   assert.equal(await off.win.__sdAgent.history(), null);
 });
+
+test('the settings page reports the engine self-check state', () => {
+  const { win } = load();
+  // No health module (older build): no diagnostics row at all.
+  assert.equal(win.__sdAgent._healthState().text, '');
+
+  win.__sdHealth = { report: () => ({ ok: true, failed: [], modules: [] }) };
+  assert.ok(/All page checks pass/.test(win.__sdAgent._healthState().text));
+
+  win.__sdHealth = { report: () => ({ ok: false, failed: [{ id: 'composer' }, { id: 'copy' }], modules: ['__sdRun'] }) };
+  const st = win.__sdAgent._healthState();
+  assert.equal(st.ok, false);
+  assert.ok(/2 page checks failed/.test(st.text), st.text);
+  assert.ok(/1 modules missing/.test(st.text), st.text);
+
+  // A health module that throws must never break the settings page.
+  win.__sdHealth = { report: () => { throw new Error('boom'); } };
+  assert.deepEqual(plain(win.__sdAgent._healthState()), { text: '', ok: null });
+});

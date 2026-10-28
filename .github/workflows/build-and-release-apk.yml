@@ -47,6 +47,7 @@ jobs:
       - name: Engine unit tests + compliance harness self-test
         run: |
           npm run test:engine
+          npm run test:scripts
           npm run test:compliance-harness
         env:
           NODE_OPTIONS: --max-old-space-size=4096
@@ -81,6 +82,25 @@ jobs:
             exit 1
           fi
           find android/app/src/main/jniLibs -type f -exec ls -l {} +
+      - name: Report 16 KB page-size readiness (Android 15+ devices)
+        # Google Play refuses updates whose native libraries are not 16 KB
+        # aligned from 2027-02-01. The libraries come from Termux, so this is
+        # reported, never silently assumed - and never blocks the build, which
+        # would leave the app with no way to ship a fix.
+        if: always()
+        run: |
+          total=0; bad=0
+          while IFS= read -r f; do
+            total=$((total+1))
+            align=$(readelf -lW "$f" | awk '/^  LOAD/ {print $NF}' | sort -u | tail -1)
+            case "$align" in
+              0x4000|0x10000|0x20000|0x40000|0x100000) ;;
+              *) bad=$((bad+1)); echo "::warning file=$f::PT_LOAD alignment ${align:-unknown} is below 16 KB";;
+            esac
+          done < <(find android/app/src/main/jniLibs -name '*.so' 2>/dev/null | sort)
+          echo "native libraries: $total, below 16 KB alignment: $bad"
+          if [ "$total" -eq 0 ]; then echo "::warning::no native libraries found: the Linux sandbox is not in this build"; fi
+
       - name: Make Gradle Wrapper Executable
         working-directory: android
         run: chmod +x ./gradlew

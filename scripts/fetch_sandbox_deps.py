@@ -200,6 +200,46 @@ def elf_dynamic(blob: bytes) -> tuple[list[str], str | None]:
     return needed, soname
 
 
+def elf_load_align(blob: bytes) -> int:
+    """The largest p_align of the PT_LOAD segments (0 when unknown).
+
+    Android 15+ devices can use 16 KB memory pages, and every loadable segment
+    of a 64-bit library must then be aligned to 16 KB (0x4000) or the loader
+    refuses the file. Termux still ships libraries linked for 4 KB pages, so this
+    is measured here, reported loudly, and never silently assumed.
+    """
+    import struct
+    if blob[:4] != b"\x7fELF":
+        return 0
+    is64 = blob[4] == 2
+    end = "<" if blob[5] == 1 else ">"
+    try:
+        if is64:
+            e_phoff, = struct.unpack_from(end + "Q", blob, 0x20)
+            e_phentsize, e_phnum = struct.unpack_from(end + "HH", blob, 0x36)
+            fmt = end + "IIQQQQQQ"
+        else:
+            e_phoff, = struct.unpack_from(end + "I", blob, 0x1C)
+            e_phentsize, e_phnum = struct.unpack_from(end + "HH", blob, 0x2A)
+            fmt = end + "IIIIIIII"
+    except struct.error:
+        return 0
+    align = 0
+    for i in range(e_phnum):
+        try:
+            fields = struct.unpack_from(fmt, blob, e_phoff + i * e_phentsize)
+        except struct.error:
+            return align
+        if fields[0] != 1:  # PT_LOAD
+            continue
+        p_align = fields[7] if is64 else fields[6]
+        align = max(align, p_align)
+    return align
+
+
+PAGE_16K = 0x4000
+
+
 # Libraries every Android device provides to apps (NDK stable system libs).
 ANDROID_SYSTEM_LIBS = {
     "libc.so", "libm.so", "libdl.so", "liblog.so", "libz.so", "libandroid.so",
@@ -304,7 +344,21 @@ def fetch_proot(out_dir: str) -> dict:
             with open(os.path.join(dest, name), "wb") as f:
                 f.write(data)
             os.chmod(os.path.join(dest, name), 0o755)
-        notice[abi] = {"arch": arch, "mirror": mirror, **versions}
+        # 16 KB page-size readiness (Android 15+ devices; Google Play refuses
+        # updates without it from 2027-02-01). Measured, printed, not assumed.
+        aligns = {name: elf_load_align(data) for name, data in got.items()}
+        misaligned = sorted(n for n, a in aligns.items() if 0 < a < PAGE_16K)
+        page_16k = not misaligned
+        if page_16k:
+            log(f"{abi}: 16 KB page size: OK (every library is 16 KB aligned)")
+        else:
+            log(f"{abi}: 16 KB page size: NOT READY - {len(misaligned)} librar"
+                f"{'y is' if len(misaligned) == 1 else 'ies are'} only 4 KB aligned "
+                f"({', '.join(misaligned)}). These do not load on 16 KB-page devices; "
+                f"upstream Termux has to relink them.")
+        log(f"[sandbox-deps] page-size: {abi}={'16kb' if page_16k else '4kb'}")
+        notice[abi] = {"arch": arch, "mirror": mirror, "pageSize16k": page_16k,
+                       "loadAlign": {n: a for n, a in aligns.items()}, **versions}
         deps = {n: elf_dynamic(d)[0] for n, d in got.items()}
         log(f"{abi}: {', '.join(f'{k} {v}' for k, v in versions.items())}")
         for n, d in sorted(deps.items()):
@@ -351,10 +405,48 @@ def fetch_rootfs_manifest() -> dict:
     return manifest
 
 
+def _fake_elf64(p_align: int, loads: int = 2, phoff: int = 64) -> bytes:
+    """A minimal ELF64 header plus `loads` PT_LOAD program headers (for --self-test)."""
+    import struct
+    blob = bytearray(phoff + loads * 56)
+    blob[0:4] = b"\x7fELF"
+    blob[4] = 2        # 64-bit
+    blob[5] = 1        # little endian
+    struct.pack_into("<Q", blob, 0x20, phoff)          # e_phoff
+    struct.pack_into("<HH", blob, 0x36, 56, loads)     # e_phentsize, e_phnum
+    for i in range(loads):
+        off = phoff + i * 56
+        struct.pack_into("<IIQQQQQQ", blob, off, 1, 5, 0, 0, 0, 0, 0, p_align)
+    return bytes(blob)
+
+
+def self_test() -> int:
+    """Checks the page-size measurement itself (no network)."""
+    assert elf_load_align(_fake_elf64(0x1000)) == 0x1000, "4 KB alignment not read"
+    assert elf_load_align(_fake_elf64(0x4000)) == 0x4000, "16 KB alignment not read"
+    assert elf_load_align(_fake_elf64(0x1000, loads=1)) == 0x1000
+    # A larger alignment among several segments wins.
+    import struct
+    blob = bytearray(_fake_elf64(0x1000, loads=2))
+    struct.pack_into("<IIQQQQQQ", blob, 64 + 56, 1, 5, 0, 0, 0, 0, 0, 0x4000)
+    assert elf_load_align(bytes(blob)) == 0x4000, "max alignment not taken"
+    # Non-ELF and truncated input must return 0, never raise.
+    assert elf_load_align(b"not an elf") == 0
+    assert elf_load_align(_fake_elf64(0x4000)[:40]) == 0
+    assert elf_load_align(b"") == 0
+    # Sanity: the classic antlr/cpython constants this project cares about.
+    assert PAGE_16K == 0x4000 and android_name("libfoo.so.2") == "libfoo.so"
+    print("[sandbox-deps] self-test passed: ELF page-size measurement")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "..", "android", "app", "src", "main"))
+    ap.add_argument("--self-test", action="store_true", help="check the ELF page-size reader, no network")
     args = ap.parse_args()
+    if args.self_test:
+        return self_test()
     out = os.path.abspath(args.out)
 
     notice = fetch_proot(out)
