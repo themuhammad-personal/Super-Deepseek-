@@ -426,15 +426,27 @@
     e.stopImmediatePropagation();
     e.stopPropagation();
     toast(t('Preparing files…', 'ফাইল প্রস্তুত হচ্ছে…'));
-    convertAll(list, input).then(function (r) {
-      if (r.notes.length) toast(r.notes.slice(0, 3).join(' · ') + (r.notes.length > 3 ? ' …' : ''));
-      var dt = new DataTransfer();
-      r.files.forEach(function (f) { dt.items.add(f); });
-      try { input.files = dt.files; } catch (_) { return; }
-      if (!r.files.length) return;
+    function replayChange() {
       var ev = new Event('change', { bubbles: true });
       if (ours) ours.add(ev);
       input.dispatchEvent(ev);
+    }
+    function keepOriginals() {
+      toast(t('Could not prepare files; the original selection was kept.', 'ফাইল প্রস্তুত করা যায়নি; মূল নির্বাচন রাখা হয়েছে।'));
+      try { replayChange(); } catch (err) { console.warn('[SD files] could not replay original selection', err); }
+    }
+    convertAll(list, input).then(function (r) {
+      if (r.notes.length) toast(r.notes.slice(0, 3).join(' · ') + (r.notes.length > 3 ? ' …' : ''));
+      if (!r.files.length) return;
+      try {
+        var dt = new DataTransfer();
+        r.files.forEach(function (f) { dt.items.add(f); });
+        input.files = dt.files;
+      } catch (err) { keepOriginals(); return; }
+      try { replayChange(); } catch (err) { console.warn('[SD files] could not dispatch prepared files', err); }
+    }, function (err) {
+      console.warn('[SD files] file preparation failed', err);
+      keepOriginals();
     });
   }
   document.addEventListener('change', onChange, true);

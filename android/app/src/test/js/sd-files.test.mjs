@@ -13,7 +13,8 @@ const SRC = fs.readFileSync(path.join(here, '../../main/bds-assets/bds/sd-files.
 function load(accept, options = {}) {
   const listeners = [];
   const win = {
-    TextDecoder, Blob, File, Response, DecompressionStream, Uint8Array, Promise, console,
+    TextDecoder, Blob, File, Response, DecompressionStream, Uint8Array, Promise, Event,
+    console: options.console || console,
     setTimeout: options.setTimeout || setTimeout,
     document: { documentElement: { lang: 'en' }, addEventListener: (t, f, c) => listeners.push([t, f, c]) },
     navigator: { language: 'en' },
@@ -136,6 +137,24 @@ test('convertAll: accepted files untouched, refused ones converted, audio/video 
   assert.equal(await r.files[1].text(), 'Hi');
   assert.ok(r.notes.some((n) => /clip\.mp4: audio and video are not supported/.test(n)));
   assert.ok(r.notes.some((n) => /note\.odt → read on device/.test(n)));
+});
+
+test('failed DataTransfer setup keeps and replays the user’s original file selection', async () => {
+  const logs = [];
+  const { listeners } = load(undefined, { console: { info: (...args) => logs.push(args.join(' ')), warn: (...args) => logs.push(args.join(' ')) } });
+  const original = file(Buffer.from('hello world'), 'notes.unsupported');
+  const dispatched = [];
+  const input = {
+    tagName: 'INPUT', type: 'file', multiple: true, accept: '.pdf', files: [original],
+    hasAttribute: () => false, closest: () => null,
+    dispatchEvent: (e) => { dispatched.push(e); return true; },
+  };
+  listeners[0][1]({ target: input, stopImmediatePropagation() {}, stopPropagation() {} });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.deepEqual(input.files, [original], 'the selection was not overwritten');
+  assert.equal(dispatched.length, 1, 'the page receives a replacement change event');
+  assert.equal(dispatched[0].type, 'change');
+  assert.match(logs.join(' '), /original selection was kept/);
 });
 
 test('a capture-phase change listener is installed on the document', () => {
