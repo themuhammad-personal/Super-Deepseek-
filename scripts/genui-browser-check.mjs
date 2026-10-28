@@ -206,7 +206,7 @@ try {
 
   await test('02c streaming JSON switches to inline without leaving a busy card or transient viewer', async () => {
     const { ctx, page, errors } = await fresh();
-    const beforeInline = '{"version":1,"id":"stream-moon","kind":"svg","title":"Streaming Moon","payload":{"svg":"<svg viewBox=\\"0 0 10 10\\"';
+    const beforeInline = '{"version":1,"kind":"svg","title":"Streaming Moon","payload":{"svg":"<svg viewBox=\\"0 0 10 10\\"';
     const duringInline = '{"version":1,"id":"stream-moon","kind":"svg","title":"Streaming Moon","presentation":"inline","payload":{"svg":"<svg viewBox=\\"0 0 10 10\\" width=\\"100%\\">';
     await page.evaluate((initial) => {
       window.__streamMd = fx.message();
