@@ -166,7 +166,8 @@ test('raw call spans support name= and preserve prose around a call', () => {
   assert.equal([...hidden].every(n => n.hasAttribute('data-sd-run-raw-hidden')), true);
   hidden.forEach(n => run._restoreHiddenRawNode(n));
   assert.equal(host.textContent, 'Before.  <SDS:AUTO:MCP url="sandbox" name="run">{"command":"ls"}</SDS:AUTO:MCP> After.<SDS:AUTO:MCP url="sandbox" tool="example"/>');
-  assert.equal(host.childNodes.filter(n => n.tagName === 'SPAN').length, 0, 'restore unwraps presentation spans');
+  assert.equal(first.childNodes.filter(n => n.tagName === 'SPAN').length, 0, 'restore unwraps first paragraph spans');
+  assert.equal(second.childNodes.filter(n => n.tagName === 'SPAN').length, 0, 'restore unwraps second paragraph spans');
 });
 
 test('assistant examples and filenames are not automatic results without the protocol envelope', () => {
@@ -174,8 +175,8 @@ test('assistant examples and filenames are not automatic results without the pro
   assert.equal(run._isAutoUserText('Final: saved as mcp_results_run.txt', 'assistant'), false);
   assert.equal(run._isAutoUserText('Example marker [SDS:AUTO_MCP_RESULT]', 'assistant'), false);
   assert.equal(run._isAutoUserText('[SDS:AUTO_MCP_RESULT]{"content":"ok"}[/SDS:AUTO_MCP_RESULT]', 'assistant'), false);
-  assert.equal(run._isAutoUserText('<SuperDeepSeek>\\n[SDS:AUTO] MCP Result for run @ sandbox\\n' +
-    '[SDS:AUTO_MCP_RESULT]\\n{"content":"ok"}\\n[/SDS:AUTO_MCP_RESULT]\\n</SuperDeepSeek>', 'assistant'), true);
+  assert.equal(run._isAutoUserText('<SuperDeepSeek>\n[SDS:AUTO] MCP Result for run @ sandbox\n' +
+    '[SDS:AUTO_MCP_RESULT]\n{"content":"ok"}\n[/SDS:AUTO_MCP_RESULT]\n</SuperDeepSeek>', 'assistant'), true);
 });
 
 test('filename fallback applies only to user messages, not assistant prose', () => {
@@ -184,7 +185,7 @@ test('filename fallback applies only to user messages, not assistant prose', () 
     { role: 'assistant', auto: false, calls: 0 });
   assert.deepEqual(plain(run._classifyMessage('user', 'mcp_results_run.txt', 0, false)),
     { role: 'user', auto: true, calls: 0 });
-  const result = '[SDS:AUTO_MCP_RESULT]\\n{"content":"ok"}\\n[/SDS:AUTO_MCP_RESULT]';
+  const result = '[SDS:AUTO_MCP_RESULT]\n{"content":"ok"}\n[/SDS:AUTO_MCP_RESULT]';
   assert.deepEqual(plain(run._classifyMessage('assistant', result, 0, false)),
     { role: 'user', auto: true, calls: 0 });
 });
