@@ -166,9 +166,44 @@
   }
 
   /**
+   * Scan a body for its first real close or a later call opener. Tool bodies are
+   * JSON, so delimiter-looking text inside double-quoted JSON strings is data,
+   * not a tag boundary. Escape sequences are respected.
+   */
+  function findMcpBoundary(s, from) {
+    var inString = false;
+    var escaped = false;
+    var close = /<\/[BS]DS:(?:AUTO:)?MCP\s*>/gi;
+    var open = /<[BS]DS:(?:AUTO:)?MCP\b/gi;
+    for (var i = from; i < s.length; i++) {
+      var c = s[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (c === '\\') escaped = true;
+        else if (c === '"') inString = false;
+        continue;
+      }
+      if (c === '"') { inString = true; continue; }
+      if (c !== '<') continue;
+      close.lastIndex = i;
+      var cm = close.exec(s);
+      if (cm && cm.index === i) return { type: 'close', start: i, end: i + cm[0].length };
+      open.lastIndex = i;
+      var om = open.exec(s);
+      if (om && om.index === i) {
+        var next = readMcpOpen(s, i, om[0].length);
+        if (!next) return null;
+        if (next.valid) return { type: 'next', start: i, end: next.end };
+        i = next.end - 1;
+      }
+    }
+    return null;
+  }
+
+  /**
    * Find real MCP call spans. A streamed call without a close consumes its current
-   * available body, but stops before the next valid call opener so calls don't
-   * merge together. Attribute names inside quoted values are ignored.
+   * body, but stops before the next valid call opener so calls remain independent.
+   * Attribute names inside quoted values are ignored.
    */
   function findRawCallSpans(text) {
     var s = String(text || '');
@@ -184,17 +219,10 @@
       }
       var end = open.end;
       if (!open.selfClosing) {
-        var close = /<\/[BS]DS:(?:AUTO:)?MCP\s*>/gi;
-        close.lastIndex = open.end;
-        var cm = close.exec(s);
-        var next = findNextMcpOpen(s, open.end);
-        if (cm && (!next || cm.index < next.start)) {
-          end = cm.index + cm[0].length;
-        } else if (next) {
-          end = next.start;
-        } else {
-          end = s.length;
-        }
+        var boundary = findMcpBoundary(s, open.end);
+        if (boundary && boundary.type === 'close') end = boundary.end;
+        else if (boundary && boundary.type === 'next') end = boundary.start;
+        else end = s.length;
       }
       spans.push({ start: open.start, end: end });
       re.lastIndex = end;
