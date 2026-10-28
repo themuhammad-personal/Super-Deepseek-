@@ -18,6 +18,8 @@ test('CI runs connected Android tests across the stability-plan API matrix', () 
   assert.ok(workflow.includes('api-level: [30, 34, 35]'));
   assert.ok(workflow.includes('api-level: ${{ matrix.api-level }}'));
   assert.ok(workflow.includes("script: bash -o pipefail -c 'cd android && ./gradlew --no-daemon connectedDebugAndroidTest --stacktrace --info"));
+  assert.ok(workflow.includes('Summarize Android instrumentation result'));
+  assert.ok(workflow.includes('tail -180 /tmp/android-instrumented.log'));
   assert.ok(workflow.includes('name: android-instrumented-test-reports'));
   assert.ok(workflow.includes('cp -r android/app/src/main/bds-assets/bds android/app/src/main/assets/bds'));
 });

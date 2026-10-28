@@ -286,6 +286,19 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: bash -o pipefail -c 'cd android && ./gradlew --no-daemon connectedDebugAndroidTest --stacktrace --info 2>&1 | tee /tmp/android-instrumented.log'
+      - name: Summarize Android instrumentation result
+        if: always()
+        run: |
+          if [ -f /tmp/android-instrumented.log ]; then
+            {
+              echo '### Android instrumentation log (tail)'
+              echo '```text'
+              tail -180 /tmp/android-instrumented.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Android instrumentation log was not created.' >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Upload Android instrumentation reports
         if: always()
         uses: actions/upload-artifact@v7
