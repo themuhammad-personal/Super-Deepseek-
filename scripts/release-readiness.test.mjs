@@ -72,9 +72,9 @@ test('trusted publishing refs protect the permanent signer and treat tags as dat
   const releaseJob = workflow.slice(releaseStart);
   assert.ok(releaseStart >= 0 && releaseJob.includes(trustedPublishCondition),
     'the release job itself must block PR and untrusted-ref publication');
-  assert.ok(workflow.includes('permissions:\\n  contents: read'),
+  assert.ok(workflow.includes('permissions:' + String.fromCharCode(10) + '  contents: read'),
     'build and test jobs must receive only read access to repository contents');
-  assert.ok(releaseJob.includes('permissions:\\n      contents: write'),
+  assert.ok(releaseJob.includes('permissions:' + String.fromCharCode(10) + '      contents: write'),
     'write access must be scoped to the release-publishing job');
 
   const historyGuardStart = workflow.indexOf('- name: Verify release commit is on trusted main history');
