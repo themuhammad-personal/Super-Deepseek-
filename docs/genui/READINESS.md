@@ -28,7 +28,7 @@ Chromium acceptance **20**, sandbox-deps ELF self-test **1**.
 | Area | Bug found | Fix |
 |---|---|---|
 | Updater | The stable channel never offered an update: the continuous release is tagged `latest`, so no version could be read from the tag. | The version is read from the release notes (`**Version:**` line), never the title; tested against the real release. Repository pointer → `Super-Deepseek-`. |
-| Uploads | A zip bomb (forged sizes) could unpack without limit and exhaust the WebView's memory. | Inflate streams with a hard cap (4 MB per archive entry, 32 MB per document part). |
+| Uploads | A zip bomb (forged sizes) could unpack without limit and exhaust the WebView's memory. Multiple Office/EPUB parts could also inflate in parallel beyond the per-part cap. | Inflate streams with hard caps (4 MB per generic archive entry, 32 MB per Office/EPUB part, 48 MB total per container), serially for multi-part documents. |
 | Uploads | A 100 MB text file was decoded in full (~200 MB string). | Non-archives are read up to 24 MB, with a note. |
 | Uploads | UTF-16 files (Windows Notepad) were treated as binary. | Byte-order mark detected, decoded as text. |
 | Uploads | With no `accept` list on the chat input nothing was converted, so odt/epub/rtf/zip reached DeepSeek as is. | DeepSeek's documented formats are assumed for the chat input only. |

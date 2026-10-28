@@ -234,10 +234,11 @@ the + sheet's *Upload file* and Android shares alike:
   is split into up to 12 noted parts. UTF-16 text (with a byte-order mark) is
   read as text.
 * Unpacking is capped while it streams, never trusting the sizes an archive
-  declares: 4 MB per file inside an archive, 32 MB per document part (a zip
-  bomb is refused with a note, not unpacked). Files over 24 MB that are not
-  archives are read only up to 24 MB (more could not be uploaded anyway), with
-  a note saying so. (2.70.1)
+  declares: 4 MB per file inside a generic archive; 32 MB per Office/EPUB XML
+  part and 48 MB aggregate per Office/EPUB container. A zip bomb is refused
+  with a note, not unpacked. Files over 24 MB that are not archives are read
+  only up to 24 MB (more could not be uploaded anyway), with a note saying so.
+  (2.70.1)
 * Audio and video are refused with a message. Native picking streams files up
   to 100 MB (text and binary alike); DeepSeek's own server-side limits still
   apply to what it accepts.

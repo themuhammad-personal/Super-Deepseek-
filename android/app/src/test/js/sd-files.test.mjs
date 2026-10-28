@@ -162,6 +162,16 @@ test('a capture-phase change listener is installed on the document', () => {
   assert.ok(listeners.some(([type, , capture]) => type === 'change' && capture === true));
 });
 
+test('Office/EPUB XML members share one bounded unpacked-byte budget', async () => {
+  const { F } = load('.pdf');
+  const entry = Buffer.alloc(1024 * 1024);
+  const archive = zip({ 'part-a.xml': entry, 'part-b.xml': entry });
+  const entries = F._zipEntries(archive);
+  const full = await F._zipReadMany(archive, entries, 2 * entry.length);
+  assert.equal(full.bytes, 2 * entry.length);
+  await assert.rejects(F._zipReadMany(archive, entries, entry.length + entry.length / 2), /too large when unpacked/);
+});
+
 test('zip bombs are stopped while inflating: the declared size is not trusted', async () => {
   const { F } = load('.pdf');
   // 40 MB of zeros deflates to ~40 KB. The central directory is rewritten to claim 100 bytes.
