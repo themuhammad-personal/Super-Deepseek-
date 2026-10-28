@@ -100,9 +100,11 @@ Typing `/` in the composer opens the command popup.
 
 ## Page lifecycle
 
-The engine is injected on every `onPageFinished` of `chat.deepseek.com`. In-app
-navigation (DeepSeek is a single-page app) keeps the engine alive; a full reload
-re-injects it.
+The engine injection attempt is tied to `onPageFinished` of `chat.deepseek.com`, but a live
+chat-surface and document-identity gate is rechecked immediately before the injection claim.
+Navigation invalidates pending probes/assets; sign-in, CAPTCHA, loading, and unknown surfaces
+fail closed. In-app navigation (DeepSeek is a single-page app) keeps a valid engine alive; a
+full reload re-probes the new document before injecting.
 
 ## Launch screen
 
@@ -214,18 +216,20 @@ The check never modifies the page beyond its own (tagged `data-sd-owned`) strip.
 ## Tests
 
 - Kotlin unit tests: `android/app/src/test/java/…` (`./gradlew testDebugUnitTest`), run in CI.
-- Engine tests: `npm test` (node:test over `android/app/src/test/js/` + compliance-harness self-test
-  + the sandbox-deps ELF page-size self-test), run in CI. `repo-consistency.test.mjs` guards the
-  release identity (version in two files, versionCode ladder, engine module list vs bundle).
-- Generative UI acceptance: `npm run genui:acceptance` (20 checks, Playwright Chromium against
-  `design-preview/genui.html` / `genui-csp.html` with a mocked bridge), run in CI; screenshots are
-  uploaded as the `genui-acceptance` artifact.
-- CI (`.github/workflows/build-and-release-apk.yml`) builds and verifies an APK on the
-  current `arena/**` work branches without publishing it, and publishes only for the
-  configured release refs. It runs `connectedDebugAndroidTest` on an API 35 x86_64
-  emulator for runtime-only cookie and edge-to-edge checks; failing unit-test reports
-  are uploaded as a workflow artifact. The emulator job does not replace real-device
-  verification.
+- Engine/repository tests: `npm test` runs the Node engine suite, script-policy/release-readiness
+  checks, and synthetic compliance-harness self-test; CI runs these separately so each result is
+  visible. `repo-consistency.test.mjs` guards the version ladder and engine bundle/module contract.
+- Generative UI acceptance: `npm run genui:acceptance` runs Playwright Chromium against
+  `design-preview/genui.html` / `genui-csp.html` with a mocked bridge. The runner prints the
+  current check count; screenshots are uploaded as the `genui-acceptance` artifact.
+- CI (`.github/workflows/build-and-release-apk.yml`) builds APKs for checks and publishes only
+  for configured release refs after the APK build and complete API 30/34/35 emulator matrix pass.
+  The publishable APK gate checks package/version/versionCode, checksum, the pinned signer-certificate
+  fingerprint, and the sandbox rootfs manifest plus native `proot`/`talloc` libraries. Instrumented
+  tests currently cover cookie policy and system-bar/edge-to-edge behavior; the emulator job does
+  not replace physical-device verification.
+- The release checklist and current evidence are maintained in
+  [`docs/RELEASE-READINESS.md`](RELEASE-READINESS.md).
 
 The APK's only web assets are the engine files staged from `android/app/src/main/bds-assets/bds`;
 the official site is the chat surface. (The earlier React SPA was removed in 2.50.)

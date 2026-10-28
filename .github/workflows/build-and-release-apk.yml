@@ -18,7 +18,7 @@ on:
         default: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-apk:
@@ -150,10 +150,21 @@ jobs:
             android/app/build/test-results/testDebugUnitTest
           if-no-files-found: ignore
           retention-days: 14
+      - name: Verify release commit is on trusted main history
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish == true)
+        run: |
+          set -eu
+          git fetch --no-tags --unshallow origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
+            echo "::error::Refusing permanent signing for a release commit that is not reachable from main."
+            exit 1
+          fi
+          echo "Release ref points to a commit already present in main."
+
       # Publishable APKs must use the permanent signing identity. A one-off CI key is
       # acceptable only for PR/manual test artifacts, which are never published.
       - name: Prepare permanent release signing key
-        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish == true)
+        if: (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) || (github.event_name == 'workflow_dispatch' && inputs.publish == true && github.ref == 'refs/heads/main')
         working-directory: android
         env:
           BDS_KEYSTORE: ${{ secrets.BDS_KEYSTORE }}
@@ -233,6 +244,49 @@ jobs:
       - name: Verify APK Signature
         run: |
           $ANDROID_HOME/build-tools/36.0.0/apksigner verify --verbose "${{ steps.prep.outputs.apk_path }}"
+      - name: Gate publishable APK identity, checksum, signature, and sandbox
+        if: (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) || (github.event_name == 'workflow_dispatch' && inputs.publish == true && github.ref == 'refs/heads/main')
+        env:
+          APK_PATH: ${{ steps.prep.outputs.apk_path }}
+          EXPECTED_CERT_SHA256: 75ebff1ca33e27e8f14d98122dc5e6db811a1c77f37133b7bbbd24cd75ba3803
+        run: |
+          set -euo pipefail
+          test -s "$APK_PATH"
+          test -s "$APK_PATH.sha256"
+          sha256sum --check "$APK_PATH.sha256"
+
+          EXPECTED_VERSION="$(node -p "require('./package.json').version")"
+          BADGING="$($ANDROID_HOME/build-tools/36.0.0/aapt dump badging "$APK_PATH")"
+          APP_ID="$(printf '%s\n' "$BADGING" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -n 1)"
+          APK_VERSION="$(printf '%s\n' "$BADGING" | sed -n "s/^package:.*versionName='\([^']*\)'.*/\1/p" | head -n 1)"
+          APK_VERSION_CODE="$(printf '%s\n' "$BADGING" | sed -n "s/^package:.*versionCode='\([^']*\)'.*/\1/p" | head -n 1)"
+          VERSION_CODE_BASE="$(sed -nE 's/.*versionCode = \(([0-9_]+)L \+ bdsBuildId\).*/\1/p' android/app/build.gradle.kts | tr -d '_')"
+          if [[ "$APP_ID" != "com.superdeepseek.app" ]]; then
+            echo "::error::Unexpected APK applicationId: $APP_ID"
+            exit 1
+          fi
+          if [[ "$APK_VERSION" != "$EXPECTED_VERSION" ]]; then
+            echo "::error::APK versionName $APK_VERSION does not match package.json $EXPECTED_VERSION"
+            exit 1
+          fi
+          if [[ -z "$VERSION_CODE_BASE" || -z "$APK_VERSION_CODE" || "$APK_VERSION_CODE" -ne "$((VERSION_CODE_BASE + GITHUB_RUN_NUMBER))" ]]; then
+            echo "::error::APK versionCode does not match the current CI build identity"
+            exit 1
+          fi
+
+          APK_ENTRIES="$(unzip -Z1 "$APK_PATH")"
+          grep -qx 'assets/sandbox/rootfs.json' <<< "$APK_ENTRIES" || { echo "::error::APK is missing the Alpine rootfs manifest"; exit 1; }
+          grep -Eq '^lib/[^/]+/libproot\.so$' <<< "$APK_ENTRIES" || { echo "::error::APK is missing libproot.so"; exit 1; }
+          grep -Eq '^lib/[^/]+/libtalloc\.so$' <<< "$APK_ENTRIES" || { echo "::error::APK is missing libtalloc.so"; exit 1; }
+
+          CERT_OUTPUT="$($ANDROID_HOME/build-tools/36.0.0/apksigner verify --verbose --print-certs "$APK_PATH")"
+          CERT_SHA256="$(printf '%s\n' "$CERT_OUTPUT" | awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $NF; exit}' | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          if [[ -z "$CERT_SHA256" || "$CERT_SHA256" != "$EXPECTED_CERT_SHA256" ]]; then
+            echo "::error::APK signer certificate does not match the pinned trusted release identity"
+            printf 'Expected signer SHA-256: %s\nActual signer SHA-256: %s\n' "$EXPECTED_CERT_SHA256" "${CERT_SHA256:-missing}"
+            exit 1
+          fi
+          echo "Release APK identity, versionCode, checksum, pinned signer, and Linux sandbox payload verified."
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v7
         with:
@@ -354,8 +408,10 @@ jobs:
   release:
     name: Publish Release
     needs: [build-apk, android-instrumented-tests]
-    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.publish == true)
+    if: (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) || (github.event_name == 'workflow_dispatch' && inputs.publish == true && github.ref == 'refs/heads/main')
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
@@ -365,7 +421,13 @@ jobs:
         run: |
           VERSION=$(node -p "require('./package.json').version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"; echo "title=Super DeepSeek v${VERSION}" >> "$GITHUB_OUTPUT"; else echo "tag=latest" >> "$GITHUB_OUTPUT"; echo "title=Super DeepSeek (Continuous Build #${{ github.run_number }})" >> "$GITHUB_OUTPUT"; fi
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            printf 'tag=%s\n' "$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+            printf 'title=Super DeepSeek v%s\n' "$VERSION" >> "$GITHUB_OUTPUT"
+          else
+            printf 'tag=latest\n' >> "$GITHUB_OUTPUT"
+            printf 'title=Super DeepSeek (Continuous Build #%s)\n' "$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+          fi
       - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.rel_cfg.outputs.tag }}

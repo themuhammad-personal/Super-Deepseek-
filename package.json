@@ -18,7 +18,7 @@
     "android:stage-engine": "rm -rf android/app/src/main/assets/bds && mkdir -p android/app/src/main/assets && cp -r android/app/src/main/bds-assets/bds android/app/src/main/assets/bds",
     "android:fetch-sandbox": "python3 scripts/fetch_sandbox_deps.py",
     "android:assemble:release": "cd android && ./gradlew assembleRelease",
-    "test:scripts": "python3 scripts/fetch_sandbox_deps.py --self-test && node --test scripts/ci-signing-policy.test.mjs"
+    "test:scripts": "python3 scripts/fetch_sandbox_deps.py --self-test && node --test scripts/ci-signing-policy.test.mjs scripts/release-readiness.test.mjs"
   },
   "devDependencies": {
     "acorn": "^8.14.0",

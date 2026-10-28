@@ -1,4 +1,6 @@
-# Super DeepSeek 2.71.0: ফোনে টেস্ট করার গাইড
+# Super DeepSeek 2.72.0: ফোনে GenUI টেস্ট করার গাইড
+
+এটি Generative UI-র হাতে-কলমে device test guide। পূর্ণ অ্যাপের PASS/FAIL/BLOCKED/NOT TESTED regression checklist ও বর্তমান CI evidence: [Release Readiness](../RELEASE-READINESS.md)।
 
 প্রতিটা টেস্টে চারটা জিনিস আছে: **কোথায়**, **প্রম্পট (কপি-পেস্ট করুন)**, **পাস হলে কী দেখবেন**, আর **ফেল হলে কী লিখে জানাবেন**।
 

@@ -9,7 +9,7 @@ versionCode step — see `repo-consistency.test.mjs`.
 
 1. `npm ci`
 2. `npm test`                         — engine unit tests + compliance-harness self-test
-3. `npx playwright install chromium && npm run genui:acceptance`   — 20 GenUI acceptance checks
+3. `npx playwright install chromium && npm run genui:acceptance`   — Chromium/Playwright GenUI acceptance checks (the runner prints the current count)
 4. `npm run android:stage-engine`     — copies `android/app/src/main/bds-assets/bds` → `android/app/src/main/assets/bds` (REQUIRED)
 5. `python3 scripts/fetch_sandbox_deps.py` — optional Linux sandbox runtime
 6. `cd android && ./gradlew testDebugUnitTest` then `./gradlew assembleRelease` (separately on machines with ≤ 2 GB RAM)
@@ -27,6 +27,8 @@ to fall back to a debug or hard-coded key for a release. For local builds, put t
 `android/app/superdeepseek-release.jks`; local-only builds without it may use the debug identity.
 To configure Actions, add each secret under Settings → Secrets and variables → Actions. Set
 `BDS_KEYSTORE` to the output of `base64 -w0 superdeepseek-release.jks`.
+
+Release QA checklist and status/evidence rules: `docs/RELEASE-READINESS.md`.
 
 Low-memory machines (2 GB): tests with `./gradlew --no-daemon --max-workers=1 "-Dorg.gradle.jvmargs=-Xmx448m -XX:MaxMetaspaceSize=256m -XX:+UseSerialGC" -Pkotlin.compiler.execution.strategy=in-process -PtestMaxHeap=560m testDebugUnitTest`; release alone with `-Xmx760m`. `GRADLE_OPTS` does not size the build daemon — use `-Dorg.gradle.jvmargs`.
 
