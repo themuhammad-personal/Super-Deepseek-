@@ -266,6 +266,11 @@ jobs:
           rm -rf android/app/src/main/assets/bds
           cp -r android/app/src/main/bds-assets/bds android/app/src/main/assets/bds
           chmod +x android/gradlew
+      - name: Enable KVM for hardware-accelerated emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
       - name: Run Android instrumented tests on API 35
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -273,8 +278,23 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_2
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: cd android && ./gradlew --no-daemon connectedDebugAndroidTest
+          script: |
+            cd android
+            set -o pipefail
+            ./gradlew --no-daemon connectedDebugAndroidTest --stacktrace --info 2>&1 | tee /tmp/android-instrumented.log
+      - name: Upload Android instrumentation reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-instrumented-test-reports
+          path: |
+            /tmp/android-instrumented.log
+            android/app/build/reports/androidTests/connected/**
+            android/app/build/outputs/androidTest-results/connected/**
+          if-no-files-found: ignore
+          retention-days: 14
 
   lint:
     # Diagnostics only: Android Lint and Kotlin compiler warnings, reported as
