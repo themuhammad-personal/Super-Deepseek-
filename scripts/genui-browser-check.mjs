@@ -240,6 +240,16 @@ try {
       const frame = stage && stage.querySelector('iframe.sd-frame');
       return !!stage && !stage.classList.contains('sd-vis-loading') && !!frame && frame.getBoundingClientRect().height > 30;
     }, null, { timeout: 5000 });
+    const svg = frame.contentFrame().locator('#sds-root svg[viewBox]').first();
+    let frameBox = null, svgBox = null, contained = false;
+    for (let attempt = 0; attempt < 40; attempt++) {
+      frameBox = await frame.boundingBox();
+      svgBox = await svg.boundingBox();
+      contained = !!frameBox && !!svgBox && svgBox.y + svgBox.height <= frameBox.y + frameBox.height + 2;
+      if (contained) break;
+      await page.waitForTimeout(75);
+    }
+    assert.ok(contained, 'streamed inline frame must contain the full SVG; frame=' + JSON.stringify(frameBox) + ' svg=' + JSON.stringify(svgBox));
     assert.equal(await page.locator('.sd-art').count(), 0);
     assert.equal(await page.locator('#sd-viewer').count(), 0);
     assert.deepEqual(errors, []);
