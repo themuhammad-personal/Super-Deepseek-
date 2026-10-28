@@ -67,6 +67,11 @@ else below is extra.
   - a file browser: preview, ask the AI about a file, share, save to phone, import;
   - a **Preview** tab for running web servers and for workspace HTML, Markdown, images, video
     and audio. You also see the AI's commands and file edits live.
+- **It tells you when DeepSeek's page changes.** The engine runs on top of DeepSeek's website, so
+  a DeepSeek update can quietly break a feature. The app checks the page contract after every load
+  (message box, history, markdown, code blocks, stop button, and the engine's own modules) and shows
+  a small, dismissible strip only when something is really wrong — with a one-tap report you can
+  paste into an issue. Details: *Advanced settings → Linux & Agent → Diagnostics*.
 - **Long tasks keep running** in the background through a foreground service.
 - **Advanced settings → Linux & Agent** has everything in one place: live status, the sandbox
   switch, the agent switches, Open Studio, Stop everything and Reset Linux.

@@ -973,6 +973,27 @@
     try { var b = bridge(); if (b && typeof b.openStudio === 'function') b.openStudio(); } catch (_) {}
   }
 
+  /**
+   * One line about the engine self-check (sd-health.js): whether the page the
+   * engine rides on still looks the way it expects. Empty when the module did
+   * not run (an older build, or before the first check).
+   */
+  function healthState() {
+    try {
+      var h = window.__sdHealth;
+      if (!h || typeof h.report !== 'function') return { text: '', ok: null };
+      var r = h.report();
+      if (!r) return { text: t('not checked yet', 'এখনো যাচাই হয়নি'), ok: null };
+      var text = r.ok
+        ? t('All page checks pass', 'সব পেজ-চেক ঠিক আছে')
+        : t((r.failed.length || 0) + ' page checks failed', (r.failed.length || 0) + 'টি পেজ-চেক ব্যর্থ');
+      if (r.modules && r.modules.length) {
+        text += t(' · ' + r.modules.length + ' modules missing', ' · ' + r.modules.length + 'টি মডিউল নেই');
+      }
+      return { text: text, ok: !!r.ok };
+    } catch (_) { return { text: '', ok: null }; }
+  }
+
   function fillPage(host, i) {
     host.textContent = '';
     var on = i.enabled !== false;
@@ -1058,6 +1079,19 @@
       });
     }
 
+    // Engine self-check (sd-health.js): the page it rides on can change under
+    // us at any deploy, so the state is one tap away next to the other tools.
+    var hs = healthState();
+    if (hs.text) {
+      var diag = section(host, t('Diagnostics', 'ডায়াগনস্টিকস'));
+      row(diag, {
+        icon: 'loop', chevron: true,
+        title: t('Engine health', 'ইঞ্জিনের স্বাস্থ্য'),
+        sub: hs.text,
+        onClick: function () { try { window.__sdHealth.open(); } catch (_) {} }
+      });
+    }
+
     var foot = [];
     if (i.installed) foot.push(t('Files: ', 'ফাইল: ') + (i.workspace || '/root/workspace'));
     if (typeof i.freeBytes === 'number' && i.freeBytes >= 0) foot.push(t('Free: ', 'খালি: ') + Math.round(i.freeBytes / 1048576) + ' MB');
@@ -1077,7 +1111,7 @@
     if (!host) return;
     // Rebuilding the rows while one is being pressed would eat the tap.
     var sig = JSON.stringify([i.enabled, i.mode, i.installed, i.installing, i.active > 0 || state.active, autoContinue(),
-      Date.now() - page.resetArmed < 4000, isBn(), i.supported]);
+      Date.now() - page.resetArmed < 4000, isBn(), i.supported, healthState().text]);
     if (host.getAttribute('data-sig') !== sig) { fillPage(host, i); host.setAttribute('data-sig', sig); return; }
     var line = statusText(i);
     var sub = host.querySelector('.sd-status .bds-set-sub');
@@ -1359,6 +1393,7 @@
     _isSandboxUrl: isSandboxUrl,
     _sweepCards: sweepCards,
     _looksUnfinished: looksUnfinished,
+    _healthState: healthState,
     _nudgeFor: nudgeFor,
     _promptContext: promptContext,
     _statusText: statusText,

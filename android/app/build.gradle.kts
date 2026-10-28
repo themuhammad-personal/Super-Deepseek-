@@ -12,7 +12,8 @@ val bdsBuildId: Long = (project.findProperty("bdsBuildId") as String?)?.toLongOr
 
 android {
     namespace = "com.superdeepseek.app"
-    compileSdk = 34
+    // Android 16 (API 36). targetSdk 36 is what Play requires for updates since 2026-08-31.
+    compileSdk = 36
 
     buildFeatures {
         buildConfig = true
@@ -21,16 +22,18 @@ android {
     defaultConfig {
         applicationId = "com.superdeepseek.app"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 36
         // Monotonically increasing versionCode ensures updates install smoothly over older versions.
         // 2.50 moved to a new signing key. 2.60 (same key) uses a new base so the local 2.60.0
         // baseline (bdsBuildId = 0) and every later CI build (2_600_100 + run number, 2.60.1) update any
         // 2.50.x build in place. 2.70 (same key) starts at 2_700_000 so it updates every 2.60.x build;
         // 2.70.1 moves to 2_701_000 so it is above every 2.70.0 CI build (run numbers < 1000).
         // 2.71.0 starts at 2_710_000 so it is above every 2.70.x build.
-        versionCode = (2_710_000L + bdsBuildId).toInt()
+        // 2.72.0 starts at 2_720_000 so it is above every 2.71.x build (toolchain update:
+        // AGP 8.13.2 / Gradle 8.13 / Kotlin 2.3.21 / compileSdk+targetSdk 36).
+        versionCode = (2_720_000L + bdsBuildId).toInt()
         // Keep in sync with package.json "version".
-        versionName = "2.71.0"
+        versionName = "2.72.0"
         buildConfigField("long", "BUILD_ID", "${bdsBuildId}L")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -79,8 +82,11 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
+    // Kotlin 2.x: compilerOptions replaces the removed/deprecated kotlinOptions block.
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
     }
 
     packaging {
@@ -112,11 +118,15 @@ android {
 }
 
 dependencies {
-    implementation("androidx.core:core-ktx:1.13.1")
+    // Deliberately NOT the newest releases lint offers (core-ktx 1.19.1, webkit 1.18.0, …):
+    // those AARs require compileSdk 37, and AGP 8.13 tops out at API 36.1. They come back
+    // when the project moves to AGP 9.x. These are the newest lines that still build on
+    // compileSdk 36; androidx.webkit matters most, because this app IS a WebView.
+    implementation("androidx.core:core-ktx:1.16.0")
     implementation("androidx.core:core-splashscreen:1.0.1")
-    implementation("androidx.appcompat:appcompat:1.7.0")
-    implementation("androidx.activity:activity-ktx:1.9.2")
-    implementation("androidx.webkit:webkit:1.11.0")
+    implementation("androidx.appcompat:appcompat:1.7.1")
+    implementation("androidx.activity:activity-ktx:1.10.1")
+    implementation("androidx.webkit:webkit:1.14.0")
     implementation("androidx.documentfile:documentfile:1.0.1")
 
     implementation("com.google.android.material:material:1.12.0")
@@ -127,10 +137,12 @@ dependencies {
     testImplementation("org.mockito.kotlin:mockito-kotlin:5.4.0")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("org.json:json:20240303")
-    testImplementation("org.robolectric:robolectric:4.13")
+    // 4.17 is the first line with API 36 runtime support; with compileSdk 36 the
+    // Robolectric tests would otherwise refuse to start.
+    testImplementation("org.robolectric:robolectric:4.17")
 
-    androidTestImplementation("androidx.test.ext:junit-ktx:1.2.1")
-    androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
-    androidTestImplementation("androidx.test:rules:1.6.1")
-    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit-ktx:1.3.0")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
+    androidTestImplementation("androidx.test:rules:1.7.0")
+    androidTestImplementation("androidx.test:runner:1.7.0")
 }

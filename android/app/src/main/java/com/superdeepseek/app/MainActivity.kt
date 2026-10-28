@@ -860,7 +860,8 @@ class MainActivity : ComponentActivity() {
             "sd-native.js", "sd-files.js", "sd-agent.js", "sd-run.js", "sd-sheets.js",
             "sd-genui-protocol.js", "sd-genui-svg.js", "sd-genui-prompt.js", "sd-genui-host.js",
             "sd-genui-frame.js", "sd-genui.js", "sd-genui-viewer.js", "sd-genui-inline.js",
-            "sd-genui-visuals.js", "sd-artifacts.js", "sd-genui-mcp.js", "sd-genui-panel.js"
+            "sd-genui-visuals.js", "sd-artifacts.js", "sd-genui-mcp.js", "sd-genui-panel.js",
+            "sd-health.js"
         )
         /** "0" the first time in a document (and marks it), "1" afterwards. */
         const val ENGINE_CLAIM_JS =

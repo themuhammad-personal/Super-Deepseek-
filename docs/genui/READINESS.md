@@ -1,4 +1,4 @@
-# Generative UI — readiness report (2.70.1, 2026-10-21)
+# Generative UI — readiness report (2.72.0, 2026-10-28)
 
 **Status:** implemented and verified in automated tests (JVM/Robolectric,
 Node, real Chromium) and against real public MCP servers.
@@ -10,6 +10,18 @@ Node, real Chromium) and against real public MCP servers.
 * Live-model compliance with the v3 prompt (not measured).
 
 Read "Not verified" before relying on anything here.
+
+## What changed in 2.72.0
+
+| Area | Change |
+|---|---|
+| Engine self-check | `sd-health.js` (new): probes the page contract (each check lists alternative selectors) and the globals every native module installs. A failed core check or 3+ failed feature checks show a dismissible strip; the report is one tap to copy; the last 20 runs are kept locally. *Linux & Agent → Diagnostics* shows the state. Bengali and English. |
+| Toolchain | AGP 8.5.2 → 8.13.2, Gradle 8.7 → 8.13, Kotlin 1.9.24 → 2.3.21, compileSdk/targetSdk 34 → 36, build-tools 36.0.0, Robolectric 4.13 → 4.17. androidx on the newest lines that still build on SDK 36 (`androidx.webkit` 1.11.0 → 1.14.0). |
+| 16 KB page sizes | `fetch_sandbox_deps.py` measures `p_align` of every shipped library and reports per-ABI readiness; CI annotates each library that is still 4 KB aligned. It never blocks a build. |
+| Release identity | `repo-consistency.test.mjs` (new): `package.json` ↔ `versionName`, the `versionCode` ladder, the engine module list vs the bundle, and the version named in the build docs. |
+
+Test counts on this commit: engine **206**, Kotlin/Robolectric **283**,
+Chromium acceptance **20**, sandbox-deps ELF self-test **1**.
 
 ## What changed in 2.70.1 (full review of 2.70.0)
 
