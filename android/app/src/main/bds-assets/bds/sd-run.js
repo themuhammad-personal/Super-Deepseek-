@@ -127,7 +127,7 @@
 
   function isAutoUserText(text) {
     var tx = String(text || '');
-    if (AUTO_RE.test(tx) || /SDS:AUTO_MCP|<\/?SuperDeepSeek>/.test(tx)) return true;
+    if (AUTO_RE.test(tx) || /SDS:AUTO_MCP/.test(tx)) return true;
     return /\bmcp_results?(?:_[A-Za-z0-9_.-]+)?\.txt\b/.test(tx);
   }
 
