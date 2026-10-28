@@ -290,9 +290,14 @@ jobs:
         if: failure()
         run: |
           if [ -f /tmp/android-instrumented.log ]; then
-            grep -E 'FAILURES|Tests run:|FAILED|Exception|Assertion|Expected:|Actual:|INSTRUMENTATION_STATUS|Error in |Process:' /tmp/android-instrumented.log | tail -80 | while IFS= read -r line; do
-              echo "::error::$line"
-            done || true
+            grep -E 'FAILURES|Tests run:|FAILED|Exception|Assertion|Expected:|Actual:|INSTRUMENTATION_STATUS|Error in |Process:' /tmp/android-instrumented.log | tail -80 > /tmp/android-instrumented-failures.log || true
+            if [ -s /tmp/android-instrumented-failures.log ]; then
+              while IFS= read -r line; do echo "::error::$line"; done < /tmp/android-instrumented-failures.log
+            else
+              tail -40 /tmp/android-instrumented.log | while IFS= read -r line; do echo "::error::$line"; done
+            fi
+          else
+            echo '::error::Android instrumentation runner did not create /tmp/android-instrumented.log'
           fi
       - name: Summarize Android instrumentation result
         if: always()

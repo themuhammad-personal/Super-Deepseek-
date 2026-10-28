@@ -1,6 +1,5 @@
 package com.superdeepseek.app
 
-import android.graphics.Color
 import android.view.WindowManager
 import android.widget.FrameLayout
 import androidx.core.view.ViewCompat
@@ -28,24 +27,18 @@ class EdgeToEdgeTest {
     val activityRule = ActivityScenarioRule(MainActivity::class.java)
 
     @Test
-    fun statusBarColor_isTransparent() {
+    fun systemBars_doNotAddAnAutomaticContrastScrim() {
         activityRule.scenario.onActivity { activity ->
-            assertEquals(
-                "Status bar must be fully transparent for edge-to-edge",
-                Color.TRANSPARENT,
-                activity.window.statusBarColor,
-            )
-        }
-    }
-
-    @Test
-    fun navigationBarColor_isTransparent() {
-        activityRule.scenario.onActivity { activity ->
-            assertEquals(
-                "Navigation bar must be fully transparent — white strip not allowed",
-                Color.TRANSPARENT,
-                activity.window.navigationBarColor,
-            )
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                assertFalse(
+                    "Status bar contrast scrim must stay disabled; page colors drive the bars",
+                    activity.window.isStatusBarContrastEnforced,
+                )
+                assertFalse(
+                    "Navigation bar contrast scrim must stay disabled; page colors drive the bars",
+                    activity.window.isNavigationBarContrastEnforced,
+                )
+            }
         }
     }
 
