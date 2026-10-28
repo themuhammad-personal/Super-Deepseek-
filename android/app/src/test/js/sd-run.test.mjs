@@ -115,6 +115,17 @@ test('raw MCP call text hides only its own block, not surrounding prose', () => 
   assert.equal(hidden.has(parent), false);
 });
 
+test('filename fallback applies only to user messages, not assistant prose', () => {
+  const { R: run } = load();
+  assert.deepEqual(plain(run._classifyMessage('assistant', 'The full output is in mcp_results_run.txt.', 0, false)),
+    { role: 'assistant', auto: false, calls: 0 });
+  assert.deepEqual(plain(run._classifyMessage('user', 'mcp_results_run.txt', 0, false)),
+    { role: 'user', auto: true, calls: 0 });
+  const result = '[SDS:AUTO_MCP_RESULT]\\n{"content":"ok"}\\n[/SDS:AUTO_MCP_RESULT]';
+  assert.deepEqual(plain(run._classifyMessage('assistant', result, 0, false)),
+    { role: 'user', auto: true, calls: 0 });
+});
+
 test('plain chats are left alone', () => {
   const { R: run } = load();
   assert.deepEqual(plain(run._groupRuns([U, A(0), U, A(0)])), []);
