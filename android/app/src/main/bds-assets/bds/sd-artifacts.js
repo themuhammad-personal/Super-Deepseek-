@@ -201,11 +201,20 @@
   function openState(state) {
     var Vw = V(); if (!Vw) return;
     if (state.streaming) {
-      Vw.open({ key: state.key, live: { kind: state.kind || 'html-app', title: state.title || t('Artifact', 'আর্টিফ্যাক্ট'), payload: {} } }, { streamingText: state.body || '' });
+      var opened = Vw.open({ key: state.key, live: { kind: state.kind || 'html-app', title: state.title || t('Artifact', 'আর্টিফ্যাক্ট'), payload: {} } }, { streamingText: state.body || '' });
+      state.previewKey = opened && opened.key || null;
       return;
     }
     if (!state.key) return;
     Vw.open({ key: state.key }, { version: state.versionIndex });
+  }
+  function closeStreamingViewer(state, viewer) {
+    var current = viewer && viewer.current && viewer.current();
+    if (current && current.streamingText != null &&
+        ((state.key && current.key === state.key) || (state.previewKey && current.key === state.previewKey))) {
+      state.previewKey = null;
+      viewer.close();
+    }
   }
   function download(state) {
     var Vw = V(); if (!Vw || !state.key) return;
@@ -315,8 +324,7 @@
     var Vw = V();
     if (s.errorEl) { s.errorEl.remove(); s.errorEl = null; }
     if (CARD_KINDS.indexOf(art.kind) < 0 || (s.inlineWanted && ['svg', 'html-app', 'mermaid'].indexOf(art.kind) >= 0)) {
-      var streamingView = Vw && Vw.current && Vw.current();
-      if (streamingView && streamingView.streamingText != null && s.key && streamingView.key === s.key) Vw.close();
+      closeStreamingViewer(s, Vw);
       if (s.card) { s.card.remove(); s.card = null; }
       renderInline(block, s, art);
       record('render', art.title, art.kind + ' · inline');
@@ -361,8 +369,7 @@
       if (s.card) { s.card.remove(); s.card = null; }
       hideSource(block.container, true);
       claimDone(block.container);
-      var streamingView = Vw.current && Vw.current();
-      if (streamingView && streamingView.streamingText != null && s.key && streamingView.key === s.key) Vw.close();
+      closeStreamingViewer(s, Vw);
       return;
     }
     if (CARD_KINDS.indexOf(s.kind) < 0) return; // inline kinds appear when complete
