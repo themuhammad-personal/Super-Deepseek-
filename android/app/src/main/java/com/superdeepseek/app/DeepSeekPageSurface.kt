@@ -71,8 +71,11 @@ internal val DEEPSEEK_PAGE_SURFACE_PROBE_JS = """
         }
 
         var path = String(location.pathname || '').toLowerCase();
-        if (/(^|\/)(sign[_-]?in|log[_-]?in|login|sign[_-]?up|register|auth)(\/|$)/.test(path)) {
-          return 'auth';
+        var pathParts = path.split('/');
+        for (var p = 0; p < pathParts.length; p++) {
+          if (/^(sign[_-]?in|log[_-]?in|login|sign[_-]?up|register|auth)$/.test(pathParts[p])) {
+            return 'auth';
+          }
         }
 
         var fields = document.querySelectorAll('input, textarea');
