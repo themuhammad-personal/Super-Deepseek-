@@ -95,8 +95,9 @@ The report never blocks a build: an app that cannot be built cannot be fixed.
 
 `npm test` (engine tests + sandbox-dependency self-test + CI signing-policy tests +
 compliance harness), then CI: `./gradlew testDebugUnitTest` (283 Robolectric tests),
-the Chromium acceptance suite, and `assembleRelease` with a signature check. None
-of it replaces five minutes on a real phone; see `docs/genui/TEST-GUIDE.bn.md`.
+the Chromium acceptance suite, `assembleRelease` with a signature check, and
+`connectedDebugAndroidTest` on an API 35 x86_64 emulator. Emulator coverage is
+not a substitute for five minutes on a real phone; see `docs/genui/TEST-GUIDE.bn.md`.
 
 ## Release signing policy
 

@@ -11,6 +11,14 @@ test('the Arena working branch runs CI without enabling publication', () => {
   assert.ok(workflow.includes("if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main'"));
 });
 
+test('CI runs connected Android tests on an API 35 emulator', () => {
+  assert.ok(workflow.includes('  android-instrumented-tests:'));
+  assert.ok(workflow.includes('uses: reactivecircus/android-emulator-runner@v2'));
+  assert.ok(workflow.includes('api-level: 35'));
+  assert.ok(workflow.includes('script: cd android && ./gradlew --no-daemon connectedDebugAndroidTest'));
+  assert.ok(workflow.includes('cp -r android/app/src/main/bds-assets/bds android/app/src/main/assets/bds'));
+});
+
 test('publishable workflows require all permanent signing secrets', () => {
   assert.match(workflow, /Prepare permanent release signing key[\s\S]*?BDS_KEYSTORE: \$\{\{ secrets\.BDS_KEYSTORE \}\}/);
   for (const secret of ['BDS_KEYSTORE', 'BDS_KEYSTORE_PASSWORD', 'BDS_KEY_ALIAS', 'BDS_KEY_PASSWORD']) {
