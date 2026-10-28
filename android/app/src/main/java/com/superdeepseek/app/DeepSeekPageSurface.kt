@@ -1,5 +1,7 @@
 package com.superdeepseek.app
 
+import org.json.JSONObject
+
 /**
  * Detects when the official DeepSeek WebView is showing its own authentication
  * flow versus the actual chat. Fail closed: unknown/loading pages are never
@@ -11,13 +13,58 @@ internal enum class DeepSeekPageSurface {
     LOADING,
 }
 
-/** WebView.evaluateJavascript returns a JSON-quoted string for JS string values. */
-internal fun parseDeepSeekPageSurface(raw: String?): DeepSeekPageSurface =
-    when (raw?.trim()?.removeSurrounding("\"")?.trim()) {
+internal data class DeepSeekPageSurfaceProbe(
+    val surface: DeepSeekPageSurface,
+    val documentToken: String,
+)
+
+/** The probe returns a JSON object; an absent document token fails closed. */
+internal fun parseDeepSeekPageSurfaceProbe(raw: String?): DeepSeekPageSurfaceProbe {
+    val result = raw?.let { runCatching { JSONObject(it) }.getOrNull() }
+        ?: return DeepSeekPageSurfaceProbe(DeepSeekPageSurface.LOADING, "")
+    val token = result.optString("documentToken", "")
+    if (token.isBlank() || token == "null") {
+        return DeepSeekPageSurfaceProbe(DeepSeekPageSurface.LOADING, "")
+    }
+    val surface = when (result.optString("surface")) {
         "chat" -> DeepSeekPageSurface.CHAT
         "auth" -> DeepSeekPageSurface.AUTH
         else -> DeepSeekPageSurface.LOADING
     }
+    return DeepSeekPageSurfaceProbe(surface, token)
+}
+
+internal enum class DeepSeekEngineClaimResult {
+    CLAIMED,
+    ALREADY_PRESENT,
+    AUTH,
+    LOADING,
+    STALE,
+    UNKNOWN,
+}
+
+/** WebView.evaluateJavascript returns a JSON-quoted string for JS string values. */
+internal fun parseDeepSeekEngineClaimResult(raw: String?): DeepSeekEngineClaimResult =
+    when (raw?.trim()?.removeSurrounding("\"")?.trim()) {
+        "claimed" -> DeepSeekEngineClaimResult.CLAIMED
+        "already" -> DeepSeekEngineClaimResult.ALREADY_PRESENT
+        "auth" -> DeepSeekEngineClaimResult.AUTH
+        "loading" -> DeepSeekEngineClaimResult.LOADING
+        "stale" -> DeepSeekEngineClaimResult.STALE
+        else -> DeepSeekEngineClaimResult.UNKNOWN
+    }
+
+/**
+ * Re-probes the live page and claims the engine only when the document identity
+ * and visible surface still match. The check and marker write execute atomically
+ * in one JavaScript turn, closing the asset-loading race without modifying the DOM.
+ */
+internal fun buildDeepSeekEngineClaimScript(documentToken: String): String =
+    "(function(){var probe=($DEEPSEEK_PAGE_SURFACE_PROBE_JS);" +
+        "if(probe.documentToken!==${JSONObject.quote(documentToken)})return 'stale';" +
+        "if(probe.surface!=='chat')return probe.surface==='auth'?'auth':'loading';" +
+        "if(window.__sdEngineInjected)return 'already';" +
+        "window.__sdEngineInjected=true;return 'claimed';})()"
 
 internal const val DEEPSEEK_PAGE_POLL_MS = 700L
 internal const val DEEPSEEK_AUTH_POLL_MS = 1200L
@@ -28,6 +75,7 @@ internal const val DEEPSEEK_AUTH_POLL_MS = 1200L
  */
 internal val DEEPSEEK_PAGE_SURFACE_PROBE_JS = """
     (function () {
+      var surface = (function () {
       try {
         function visible(el) {
           if (!el) return false;
@@ -102,5 +150,14 @@ internal val DEEPSEEK_PAGE_SURFACE_PROBE_JS = """
       } catch (_) {
         return 'loading';
       }
+      })();
+      return {
+        surface: surface,
+        documentToken: String(
+          window.performance &&
+          (window.performance.timeOrigin ||
+            (window.performance.timing && window.performance.timing.navigationStart)) || ''
+        )
+      };
     })()
 """.trimIndent()
