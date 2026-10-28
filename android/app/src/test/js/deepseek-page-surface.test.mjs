@@ -13,11 +13,12 @@ const HELPER = fs.readFileSync(
   path.join(here, '../../main/java/com/superdeepseek/app/DeepSeekPageSurface.kt'),
   'utf8'
 );
-const probeSource = HELPER.match(
-  /internal val DEEPSEEK_PAGE_SURFACE_PROBE_JS = """([\\s\\S]*?)"""\\.trimIndent\\(\\)/
-)?.[1];
-assert.ok(probeSource, 'DEEPSEEK_PAGE_SURFACE_PROBE_JS must stay extractable for contract tests');
-const PROBE = probeSource.trim();
+const marker = 'internal val DEEPSEEK_PAGE_SURFACE_PROBE_JS = """';
+const markerAt = HELPER.indexOf(marker);
+const bodyAt = markerAt < 0 ? -1 : HELPER.indexOf('\\n', markerAt) + 1;
+const endAt = bodyAt < 0 ? -1 : HELPER.indexOf('""".trimIndent()', bodyAt);
+assert.ok(markerAt >= 0 && bodyAt > 0 && endAt > bodyAt, 'DEEPSEEK_PAGE_SURFACE_PROBE_JS must stay extractable for contract tests');
+const PROBE = HELPER.slice(bodyAt, endAt).trim();
 
 function element({ id = '', className = '', type = '', src = '', title = '', ariaLabel = '', autocomplete = '' } = {}) {
   const attrs = {
