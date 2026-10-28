@@ -24,6 +24,7 @@ class DeepSeekPageSurfaceTest {
         assertTrue(DEEPSEEK_PAGE_SURFACE_PROBE_JS.contains("captcha"))
         assertTrue(DEEPSEEK_PAGE_SURFACE_PROBE_JS.contains("hcaptcha"))
         assertTrue(DEEPSEEK_PAGE_SURFACE_PROBE_JS.contains("sign[_-]?in"))
+        assertTrue(DEEPSEEK_PAGE_SURFACE_PROBE_JS.contains("path.split('/')"))
         assertTrue(DEEPSEEK_PAGE_SURFACE_PROBE_JS.contains("textarea#chat-input"))
         assertTrue(DEEPSEEK_PAGE_SURFACE_PROBE_JS.contains("return 'loading'"))
     }
