@@ -113,11 +113,11 @@ try {
     await page.locator('.sd-art', { hasText: 'Old notes' }).waitFor({ timeout: 3000 });
     assert.ok(Date.now() - t0 < 1200, 'old-chat block rendered in ' + (Date.now() - t0) + 'ms');
     // Broken typed output becomes a source-only artifact; raw code stays hidden until opened.
-    await page.evaluate(() => { const a = fx.message(); fx.block(a, 'sds-genui', 'id: broken\nkind: ui\ntitle: Broken\n---\n{not json'); fx.para(a, 'x'); });
+    await page.evaluate(() => { const a = fx.message(); window.__brokenArtifactSource = fx.block(a, 'sds-genui', 'id: broken\nkind: ui\ntitle: Broken\n---\n{not json').closest('.md-code-block'); fx.para(a, 'x'); });
     const fallback = page.locator('.sd-art[data-kind="code"]').filter({ hasText: 'Broken' }).last();
     await fallback.waitFor({ timeout: 4000 });
     const hidden = await page.evaluate(() => {
-      const source = [...document.querySelectorAll('.md-code-block[data-sd-hidden="artifact"]')].pop();
+      const source = window.__brokenArtifactSource;
       return !!source && getComputedStyle(source).display === 'none';
     });
     assert.equal(hidden, true, 'raw code stays hidden behind the source-only artifact');
