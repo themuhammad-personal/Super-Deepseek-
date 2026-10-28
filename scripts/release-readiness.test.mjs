@@ -53,9 +53,21 @@ test('published release still requires permanent signing material, never a test 
   assert.match(workflow, /for name in BDS_KEYSTORE BDS_KEYSTORE_PASSWORD BDS_KEY_ALIAS BDS_KEY_PASSWORD/);
 });
 
+test('trusted publishing refs protect the permanent signer and treat tags as data', () => {
+  const trustedPublishCondition = "if: (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) || (github.event_name == 'workflow_dispatch' && inputs.publish == true && github.ref == 'refs/heads/main')";
+  assert.equal(workflow.split(trustedPublishCondition).length - 1, 3,
+    'permanent signing, APK gate, and release publishing must share trusted-event/ref rules');
+
+  const releaseConfig = workflow.match(/- id: rel_cfg([\\s\\S]*?)(?=\\n      - uses: softprops\\/action-gh-release@v3)/)?.[1];
+  assert.ok(releaseConfig, 'release configuration step must exist');
+  assert.match(releaseConfig, /if \\[\\[ "\\$GITHUB_REF" == refs\\/tags\\/v\\\\\\* \\]\\]/);
+  assert.doesNotMatch(releaseConfig, /\\$\\{\\{\\s*github\\.(?:ref|ref_name)\\s*\\}\\}/,
+    'untrusted ref values must not be interpolated into shell source');
+});
+
 test('README and build notes do not freeze changing Chromium acceptance totals', () => {
   for (const [name, doc] of [['README.md', readme], ['BUILD-NOTES.md', buildNotes]]) {
-    assert.doesNotMatch(doc, /\b(?:15|20|21|29)\s+(?:Generative UI |GenUI )?acceptance checks\b/i, name);
+    assert.doesNotMatch(doc, /\b\d+\s+(?:Generative UI |GenUI )?acceptance checks\b/i, name);
     assert.match(doc, /RELEASE-READINESS\.md/, name);
   }
 });
