@@ -8,7 +8,7 @@ const gradle = await readFile(new URL('../android/app/build.gradle.kts', import.
 test('the Arena working branch runs CI without enabling publication', () => {
   assert.ok(workflow.includes('      - "arena/**"'));
   assert.ok(workflow.includes("github.event_name == 'push' && github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/v')"));
-  assert.ok(workflow.includes("if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main'"));
+  assert.ok(workflow.includes("if: (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) || (github.event_name == 'workflow_dispatch' && inputs.publish == true && github.ref == 'refs/heads/main')"));
 });
 
 test('CI runs connected Android tests across the stability-plan API matrix', () => {
