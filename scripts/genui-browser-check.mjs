@@ -210,6 +210,43 @@ try {
     await ctx.close();
   });
 
+  await test('02f id-less malformed blocks get isolated source-only artifacts', async () => {
+    const { ctx, page, errors } = await fresh();
+    await page.evaluate(() => {
+      const md = fx.message();
+      fx.block(md, 'sds-genui', 'kind: ui\\ntitle: First Broken Spec\\n---\\n{first: invalid');
+      fx.para(md, 'between');
+      fx.block(md, 'sds-genui', 'kind: ui\\ntitle: Second Broken Spec\\n---\\n{second: invalid');
+      fx.para(md, 'done');
+    });
+    const first = page.locator('.sd-art[data-kind="code"]').filter({ hasText: 'First Broken Spec' });
+    const second = page.locator('.sd-art[data-kind="code"]').filter({ hasText: 'Second Broken Spec' });
+    await first.waitFor(); await second.waitFor();
+    assert.equal(await page.locator('.sd-art[data-kind="code"]').count(), 2);
+    const keys = await page.evaluate(() => window.__sdGenUIViewer.store.list().filter(r => r.kind === 'code').map(r => r.key));
+    assert.equal(new Set(keys).size, 2, 'source-only records must not collide');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
+
+  await test('02g source fallback does not overwrite a prior working artifact version', async () => {
+    const { ctx, page, errors } = await fresh();
+    await page.evaluate(() => {
+      const md = fx.message();
+      fx.block(md, 'sds-genui', 'id: stable-app\\nkind: html-app\\ntitle: Working App\\n---\\n<!doctype html><html><head><title>Working</title></head><body><h1>Working app</h1></body></html>');
+      fx.para(md, 'next');
+      fx.block(md, 'sds-genui', 'id: stable-app\\nkind: ui\\ntitle: Broken Revision\\n---\\n{not valid JSON');
+      fx.para(md, 'done');
+    });
+    await page.locator('.sd-art[data-kind="html-app"]').filter({ hasText: 'Working App' }).waitFor();
+    await page.locator('.sd-art[data-kind="code"]').filter({ hasText: 'Broken Revision' }).waitFor();
+    const recs = await page.evaluate(() => window.__sdGenUIViewer.store.list().map(r => ({ key: r.key, kind: r.kind, title: r.title, versions: r.versions.length })));
+    assert.ok(recs.some(r => r.kind === 'html-app' && r.title === 'Working App' && r.key.endsWith(':stable-app')), JSON.stringify(recs));
+    assert.ok(recs.some(r => r.kind === 'code' && r.title === 'Broken Revision' && r.key.includes(':stable-app-source-')), JSON.stringify(recs));
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
+
   await test('03 streaming: card shows "Generating…", viewer streams code, then exactly one card and live preview', async () => {
     const { ctx, page, errors } = await fresh();
     await page.evaluate(() => { window.__md = fx.message(); window.__pre = fx.block(window.__md, 'sds-genui', ''); });
@@ -235,20 +272,22 @@ try {
     await ctx.close();
   });
 
-  await test('04 malformed block → quiet error card (raw code hidden behind a toggle); unknown kinds are inferred; later blocks still render', async () => {
+  await test('04 malformed block → source-only card; unknown kinds are inferred; later blocks still render', async () => {
     const { ctx, page, errors } = await fresh();
     await page.evaluate(() => {
       const md = fx.message();
-      fx.block(md, 'sds-genui', 'id: broken\nkind: ui\n---\n{"components": [oops');
+      fx.block(md, 'sds-genui', 'id: broken\nkind: ui\ntitle: Broken UI\n---\n{"components": [oops');
       fx.para(md, 'between');
       fx.block(md, 'sds-genui', 'id: rocket\nkind: rocket-ship\ntitle: Rocket\n---\n<div><p>x</p></div>');
       fx.para(md, 'mid');
       fx.block(md, 'sds-genui', 'id: ok-svg\nkind: svg\ntitle: Fine\n---\n<svg viewBox="0 0 4 4"><rect width="4" height="4"/></svg>');
       fx.para(md, 'after');
     });
-    await page.locator('.sd-art-error').waitFor();
+    const source = page.locator('.sd-art[data-kind="code"]').filter({ hasText: 'Broken UI' });
+    await source.waitFor();
+    assert.match(await source.locator('.sd-art-sub').textContent() || '', /source only/i);
+    assert.equal(await page.locator('.sd-art-error').count(), 0);
     assert.equal(await page.locator('.md-code-block').first().isVisible(), false, 'raw code never shown by default');
-    assert.match(await page.locator('.sd-art-error').textContent(), /Couldn.t display/);
     await page.locator('.sd-art', { hasText: 'Rocket' }).waitFor();
     await page.locator('.sd-art[data-kind="svg"]').waitFor();
     assert.deepEqual(errors, []);
@@ -384,8 +423,14 @@ try {
     // Declared mcp-app block mounts the same host; unsafe references are refused.
     await page.evaluate(() => { const md = fx.message(); fx.block(md, 'sds-genui', 'id: weather-home\nkind: mcp-app\ntitle: Weather\nserver: https://mcp.example.com/mcp\nresource: ui://weather/app.html'); fx.para(md, 'x'); });
     await page.locator('.sd-inline[data-kind="mcp-app"] .sd-mcp').waitFor();
-    await page.evaluate(() => { const md = fx.message(); fx.block(md, 'sds-genui', 'id: bad\nkind: mcp-app\nserver: http://127.0.0.1/mcp\nresource: javascript:alert(1)'); fx.para(md, 'x'); });
-    await page.locator('.sd-art-error').waitFor();
+    await page.evaluate(() => { const md = fx.message(); fx.block(md, 'sds-genui', 'id: bad\nkind: mcp-app\ntitle: Unsafe Resource\nserver: http://127.0.0.1/mcp\nresource: javascript:alert(1)'); fx.para(md, 'x'); });
+    const unsafe = page.locator('.sd-art[data-kind="code"]').filter({ hasText: 'Unsafe Resource' });
+    await unsafe.waitFor();
+    assert.match(await unsafe.locator('.sd-art-sub').textContent() || '', /source only/i);
+    assert.equal(await page.locator('.sd-art-error').count(), 0, 'unsafe URI stays source-only and is not mounted');
+    await unsafe.click();
+    await page.locator('#sd-viewer .sd-code').waitFor();
+    assert.match(await page.locator('#sd-viewer .sd-code').textContent() || '', /javascript:alert/);
     assert.deepEqual(errors, []);
     await ctx.close();
   });

@@ -184,7 +184,7 @@
     try {
       if (art.kind === 'ui') return JSON.stringify(p.spec, null, 2);
       if (art.kind === 'tool-result') return JSON.stringify(p.result, null, 2);
-      if (art.kind === 'mcp-app') return JSON.stringify({ resourceUri: p.resourceUri, view: p.view || 'app' }, null, 2);
+      if (art.kind === 'mcp-app') return JSON.stringify({ resourceUri: p.resourceUri, serverUrl: p.serverUrl, view: p.view || 'app' }, null, 2);
       if (Vw && Vw.sourceOf) out = Vw.sourceOf(art);
     } catch (_) {}
     if (typeof out === 'string' && out.trim()) return out;
@@ -201,13 +201,17 @@
     if (art.kind === 'ui' || art.kind === 'tool-result' || art.kind === 'mcp-app') return 'json';
     return 'text';
   }
-  function fallbackId(source, preferred) {
+  function fallbackId(source, preferred, token) {
     var raw = preferred || '';
-    if (!raw && /^\s*\{/.test(source)) { try { var v = JSON.parse(source); raw = v && (v.id || v.title) || ''; } catch (_) {} }
-    if (!raw) raw = headerValue(source, 'id') || headerValue(source, 'title') || 'artifact-source';
-    var id = String(raw).replace(/[^A-Za-z0-9_-]/g, '-').replace(/^-+/, '');
-    if (!/^[A-Za-z]/.test(id)) id = 'artifact-' + id;
-    return id.slice(0, 64) || 'artifact-source';
+    if (!raw && /^\s*\{/.test(source)) { try { var v = JSON.parse(source); raw = v && v.id || ''; } catch (_) {} }
+    if (!raw) raw = headerValue(source, 'id');
+    if (!raw) return ('artifact-source-' + String(token || '0').toLowerCase().replace(/[^a-z0-9_-]/g, '-')).slice(0, 64);
+    raw = String(raw);
+    var safe = raw.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/^-+|-+$/g, '');
+    if (!safe || !/^[a-z]/.test(safe)) safe = 'artifact-' + safe;
+    var Ho = H(), digest = Ho && Ho.hash ? Ho.hash(raw) : String(raw.length.toString(36));
+    var suffix = '-source-' + String(digest).toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 10);
+    return safe.slice(0, Math.max(1, 64 - suffix.length)) + suffix;
   }
   function fallbackTitle(source) {
     var title = '';
@@ -223,7 +227,8 @@
     if (!source.trim() || source.length > 300000) return false;
     var Vw = V();
     if (!Vw || !Vw.store || typeof Vw.store.upsert !== 'function') return false;
-    var artifactId = fallbackId(source, id);
+    var priorKey = s.key, previewKey = s.previewKey;
+    var artifactId = fallbackId(source, id, s.fallbackToken);
     var cleanTitle = String(title || fallbackTitle(source)).slice(0, 160);
     var payload = { code: source, language: String(language || 'text').slice(0, 24) };
     try {
@@ -236,11 +241,11 @@
       if (s.errorEl) { s.errorEl.remove(); s.errorEl = null; }
       s.artifactId = artifactId; s.key = res.record.key; s.versionIndex = res.index;
       s.kind = 'code'; s.title = cleanTitle; s.payload = payload; s.streaming = false;
-      s.inlineWanted = false; s.fallbackSource = true;
+      s.inlineWanted = false; s.fallbackSource = true; s.previewKey = null;
       ensureCard(block, s); paintCard(s);
       var cur = Vw.current && Vw.current();
-      if (cur && cur.key === s.key && cur.streamingText != null) cur.stream(null, true);
-      record('source-fallback', cleanTitle, String(reason || 'renderer unavailable').slice(0, 160));
+      if (cur && cur.streamingText != null && (cur.key === previewKey || cur.key === priorKey)) Vw.open({ key: s.key }, { version: s.versionIndex });
+      record('source-fallback', cleanTitle, String(reason || 'renderer unavailable').slice(0, 160), 'recovered');
       return true;
     } catch (_) { return false; }
   }
@@ -273,10 +278,10 @@
   }
 
   /* ---------------- scanning ---------------- */
-  var states = new WeakMap(), pending = null;
+  var states = new WeakMap(), pending = null, fallbackSequence = 0, rendererFailureStreak = 0, rendererDisabled = false;
   function stateOf(container) {
     var s = states.get(container);
-    if (!s) { s = { text: null, changedAt: 0, done: false, card: null, key: null, versionIndex: 0 }; states.set(container, s); }
+    if (!s) { s = { text: null, changedAt: 0, done: false, card: null, key: null, previewKey: null, fallbackToken: (++fallbackSequence).toString(36), versionIndex: 0 }; states.set(container, s); }
     return s;
   }
   function claimDone(c) { var Ho = H(); if (Ho && Ho.claimDone) Ho.claimDone(c); }
@@ -291,11 +296,15 @@
     var Vw = V();
     if (s.errorEl) { s.errorEl.remove(); s.errorEl = null; }
     s.artifactId = art.id;
+    if (rendererDisabled) {
+      if (!sourceFallback(block, s, sourceForArtifact(art), art.title, languageForArtifact(art), 'Renderer disabled after repeated failures', art.id)) showError(s, block, 'Renderer disabled after repeated failures');
+      return;
+    }
     try {
       if (CARD_KINDS.indexOf(art.kind) < 0 || (s.inlineWanted && ['svg', 'html-app', 'mermaid'].indexOf(art.kind) >= 0)) {
         if (s.card) { s.card.remove(); s.card = null; }
         renderInline(block, s, art);
-        s.fallbackSource = false;
+        s.fallbackSource = false; s.previewKey = null; rendererFailureStreak = 0;
         record('render', art.title, art.kind + ' · inline');
         return;
       }
@@ -306,13 +315,20 @@
       paintCard(s);
       var cur = Vw.current && Vw.current();
       if (cur && cur.key === s.key && cur.streamingText != null) cur.stream(null, true);
+      s.previewKey = null; rendererFailureStreak = 0;
       record('render', art.title, art.kind + (raw ? ' (auto-detected)' : '') + ' · v' + (res.index + 1));
     } catch (e) {
       var message = String(e && e.message || e).slice(0, 200);
+      rendererFailureStreak++;
+      record('render-failure', art.title, message, 'failed');
+      if (rendererFailureStreak >= 5) {
+        rendererDisabled = true;
+        try { console.warn('[SDS GenUI] artifact preview circuit opened after repeated render failures'); } catch (_) {}
+      }
       if (!sourceFallback(block, s, sourceForArtifact(art), art.title, languageForArtifact(art), message, art.id)) showError(s, block, message);
     }
   }
-  function record(type, title, detail) { var Ho = H(); try { if (Ho && Ho.ledger) Ho.ledger.record({ type: type, title: title, detail: detail, state: 'rendered', endedAt: Date.now() }); } catch (_) {} }
+  function record(type, title, detail, state) { var Ho = H(); try { if (Ho && Ho.ledger) Ho.ledger.record({ type: type, title: title, detail: detail, state: state || 'rendered', endedAt: Date.now() }); } catch (_) {} }
   function streamingPreview(block, s, text, lang) {
     // A typed block is being written: show the card with "Generating…" (Claude) and
     // feed the open viewer, if any, the live source.
@@ -328,7 +344,9 @@
         if (/^\s*presentation\s*:\s*inline\s*$/m.test(header)) s.inlineWanted = true;
         bodyText = cut >= 0 ? text.slice(cut).replace(/^\n---\s*\n/, '') : '';
         var id = headerValue(header, 'id') || (s.title ? s.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') : '');
-        if (id) s.key = Vw.store.chatKey() + ':' + (/^[a-z]/.test(id) ? id : 'a-' + id).slice(0, 64);
+        if (id && /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(id)) s.key = Vw.store.chatKey() + ':' + id;
+        else if (id) s.key = Vw.store.chatKey() + ':' + ('a-' + id.toLowerCase().replace(/[^a-z0-9_-]/g, '-')).slice(0, 64);
+        s.previewKey = s.key;
       }
     } else {
       if (RAW.indexOf(lang) >= 0 && !/<!doctype html|<html[\s>]/i.test(text)) return;
@@ -366,7 +384,7 @@
         if (r.waiting && !final) { waiting = true; if (typed || text.length > 200) streamingPreview(block, s, text, lang); return; }
         s.done = true;
         if (typed) {
-          if (!sourceFallback(block, s, text, fallbackTitle(text), sourceLanguage(text), r.error, fallbackId(text))) showError(s, block, r.error);
+          if (!sourceFallback(block, s, text, fallbackTitle(text), sourceLanguage(text), r.error, null)) showError(s, block, r.error);
         } else { if (s.card) { s.card.remove(); s.card = null; } hideSource(block.container, false); unclaim(block.container); }
       });
     });

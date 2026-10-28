@@ -292,13 +292,19 @@
       try { if (root.navigator.clipboard && root.navigator.clipboard.writeText) root.navigator.clipboard.writeText(text).then(ok, legacy); else legacy(); } catch (_) { legacy(); }
     });
   }
+  var EXT_FAMILY = { md:'markdown',markdown:'markdown',js:'javascript',javascript:'javascript',ts:'typescript',typescript:'typescript',py:'python',python:'python',kt:'kotlin',kotlin:'kotlin',sh:'shell',bash:'shell',shell:'shell',yaml:'yaml',yml:'yaml',gql:'graphql',graphql:'graphql',proto:'protobuf',protobuf:'protobuf',ps1:'powershell',powershell:'powershell',pl:'perl',perl:'perl',hs:'haskell',haskell:'haskell',ex:'elixir',elixir:'elixir' };
+  var SAFE_EXT = /^[A-Za-z0-9][A-Za-z0-9_-]{0,15}$/;
   function fileName(title, ext) {
     var raw = String(title || 'artifact').trim(), extension = String(ext || 'txt').replace(/^\./, '').toLowerCase() || 'txt';
+    raw = raw.split(/[\\/]/).pop().replace(/[\u0000-\u001f<>:"|?*]/g, '_').replace(/[ .]+$/g, '');
+    if (!raw) raw = 'artifact';
     if (extension === 'dockerfile' && /^dockerfile$/i.test(raw)) return 'Dockerfile';
     if (extension === 'makefile' && /^makefile$/i.test(raw)) return 'Makefile';
-    if (extension === 'env' && /^\.env(?:\.[a-z0-9_-]+)?$/i.test(raw)) return raw.toLowerCase();
-    if (raw.toLowerCase().slice(-(extension.length + 1)) === '.' + extension) raw = raw.slice(0, -(extension.length + 1));
-    return (raw.toLowerCase().replace(/[^a-z0-9\u0980-\u09ff]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'artifact') + '.' + extension;
+    if (extension === 'env' && /^\.env(?:\.[a-z0-9_-]+)?$/i.test(raw)) return raw;
+    var dot = raw.lastIndexOf('.'), suffix = dot > 0 ? raw.slice(dot + 1).toLowerCase() : '';
+    if (suffix && SAFE_EXT.test(suffix) && EXT_FAMILY[suffix] && EXT_FAMILY[suffix] === (EXT_FAMILY[extension] || extension)) return raw;
+    if (suffix && SAFE_EXT.test(suffix) && (EXT[suffix] || ['pdf','docx','xlsx','pptx','exe','apk','zip'].indexOf(suffix) >= 0)) raw = dot > 0 ? raw.slice(0, dot) : raw;
+    return (raw || 'artifact') + '.' + extension;
   }
 
   function versionData(rec, index) { return rec.versions[Math.max(0, Math.min(rec.versions.length - 1, index))]; }

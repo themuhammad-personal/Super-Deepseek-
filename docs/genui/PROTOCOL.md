@@ -142,7 +142,7 @@ of failing. Security checks in `validate()` stay strict.
   for up to 1.4 s until the first real size arrives.
 * A block is final when more markdown follows it, or after 1.6 s without
   changes. A visibly complete body (`</svg>`, `</html>`) also counts.
-* If a typed artifact is malformed or its renderer throws, the engine first tries a non-executable, downloadable source-only code artifact within protocol size limits. Only when that fallback cannot be safely stored does an error card appear with **Show code** and **Ask to fix**. The fallback never executes generated code. Each code block keeps its own state, so DOM mutations never duplicate cards.
+* If a typed artifact is malformed or its renderer throws, the engine first tries a non-executable, downloadable source-only code artifact within protocol size limits. The fallback uses a block-specific ID and cannot overwrite a working artifact's kind or version history. Only when that fallback cannot be safely stored does an error card appear with **Show code** and **Ask to fix**. The fallback never executes generated code. Each code block keeps its own state, so DOM mutations never duplicate cards.
 * Kill switch: disabling Generative UI removes every surface and skeleton and
   restores the original code blocks; enabling it again re-renders.
 * `guard()` circuit breaker: a module that throws repeatedly is switched off
