@@ -30,14 +30,85 @@
     var m = new RegExp('^\\s*' + key + '\\s*:\\s*(.+)$', 'm').exec(text) || new RegExp('"' + key + '"\\s*:\\s*"([^"]{1,160})"').exec(text);
     return m ? m[1].trim().slice(0, 120) : '';
   }
+  function partialJsonInlineRequested(source) {
+    var text = String(source || '').replace(/^\s+/, '');
+    if (text.charAt(0) !== '{') return false;
+    var i = 1;
+    function whitespace() { while (/\s/.test(text.charAt(i)) && i < text.length) i++; }
+    function stringValue() {
+      if (text.charAt(i) !== '"') return { complete: false };
+      var start = i++, escaped = false;
+      while (i < text.length) {
+        var ch = text.charAt(i++);
+        if (escaped) { escaped = false; continue; }
+        if (ch === '\\') { escaped = true; continue; }
+        if (ch === '"') {
+          try { return { complete: true, value: JSON.parse(text.slice(start, i)) }; }
+          catch (_) { return { complete: false }; }
+        }
+      }
+      return { complete: false };
+    }
+    function skipValue() {
+      whitespace();
+      if (i >= text.length) return false;
+      if (text.charAt(i) === '"') {
+        var str = stringValue();
+        return str.complete;
+      }
+      var first = text.charAt(i);
+      if (first === '{' || first === '[') {
+        var stack = [first === '{' ? '}' : ']'], inString = false, escaped = false;
+        i++;
+        while (i < text.length) {
+          var ch = text.charAt(i++);
+          if (inString) {
+            if (escaped) escaped = false;
+            else if (ch === '\\') escaped = true;
+            else if (ch === '"') inString = false;
+            continue;
+          }
+          if (ch === '"') inString = true;
+          else if (ch === '{') stack.push('}');
+          else if (ch === '[') stack.push(']');
+          else if (ch === '}' || ch === ']') {
+            if (stack.pop() !== ch) return false;
+            if (!stack.length) return true;
+          }
+        }
+        return false;
+      }
+      var start = i;
+      while (i < text.length && text.charAt(i) !== ',' && text.charAt(i) !== '}') i++;
+      return i > start;
+    }
+    while (i < text.length) {
+      whitespace();
+      if (text.charAt(i) === ',' ) { i++; continue; }
+      if (text.charAt(i) !== '"') return false;
+      var key = stringValue();
+      if (!key.complete) return false;
+      whitespace();
+      if (text.charAt(i++) !== ':') return false;
+      whitespace();
+      if (key.value === 'presentation') {
+        var value = stringValue();
+        return value.complete && value.value === 'inline';
+      }
+      if (!skipValue()) return false;
+    }
+    return false;
+  }
   function inlineRequested(source) {
     if (/^\s*\{/.test(source)) {
-      try { return JSON.parse(source).presentation === 'inline'; } catch (_) { return false; }
+      try { return JSON.parse(source).presentation === 'inline'; }
+      catch (_) { return partialJsonInlineRequested(source); }
     }
     // Match the protocol header boundary, not arbitrary body text. The first
     // presentation header wins, just as it does in sd-genui-protocol.js.
-    var lines = String(source || '').replace(/^\uFEFF/, '').split(/\r?\n/);
-    for (var i = 0; i < lines.length; i++) {
+    var lines = String(source || '').replace(/^\uFEFF/, '').split(/\r?\n/), i = 0;
+    while (i < lines.length && !lines[i].trim()) i++;
+    for (; i < lines.length; i++) {
       var line = lines[i];
       if (/^\s*---\s*$/.test(line) || !line.trim() || /^\s*</.test(line)) break;
       var m = /^\s*([A-Za-z][A-Za-z_-]{0,31})\s*:\s?(.*)$/.exec(line);
@@ -244,6 +315,8 @@
     var Vw = V();
     if (s.errorEl) { s.errorEl.remove(); s.errorEl = null; }
     if (CARD_KINDS.indexOf(art.kind) < 0 || (s.inlineWanted && ['svg', 'html-app', 'mermaid'].indexOf(art.kind) >= 0)) {
+      var streamingView = Vw && Vw.current && Vw.current();
+      if (streamingView && streamingView.streamingText != null && s.key && streamingView.key === s.key) Vw.close();
       if (s.card) { s.card.remove(); s.card = null; }
       renderInline(block, s, art);
       record('render', art.title, art.kind + ' · inline');
@@ -265,21 +338,34 @@
     var Vw = V(); if (!Vw) return;
     var bodyText = text;
     if (lang === 'sds-genui' || lang === 'sds-artifact') {
-      if (/^\s*\{/.test(text)) { s.kind = headerValue(text, 'kind') || 'html-app'; s.title = headerValue(text, 'title'); }
-      else {
+      if (/^\s*\{/.test(text)) {
+        var jsonKind = headerValue(text, 'kind') || 'html-app';
+        s.kind = (P.kindAliases && P.kindAliases[jsonKind.toLowerCase()]) || jsonKind;
+        s.title = headerValue(text, 'title');
+        var jsonId = headerValue(text, 'id');
+        if (jsonId) s.key = Vw.store.chatKey() + ':' + (/^[a-z]/.test(jsonId) ? jsonId : 'a-' + jsonId).slice(0, 64);
+      } else {
         var cut = text.search(/\n---\s*\n/);
         var header = cut >= 0 ? text.slice(0, cut) : text;
         s.kind = (P.kindAliases && P.kindAliases[headerValue(header, 'kind')]) || headerValue(header, 'kind') || 'html-app';
         s.title = headerValue(header, 'title');
-        if (/^\s*presentation\s*:\s*inline\s*$/m.test(header)) s.inlineWanted = true;
         bodyText = cut >= 0 ? text.slice(cut).replace(/^\n---\s*\n/, '') : '';
         var id = headerValue(header, 'id') || (s.title ? s.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') : '');
         if (id) s.key = Vw.store.chatKey() + ':' + (/^[a-z]/.test(id) ? id : 'a-' + id).slice(0, 64);
       }
+      s.inlineWanted = inlineRequested(text);
     } else {
       if (RAW.indexOf(lang) >= 0 && !/<!doctype html|<html[\s>]/i.test(text)) return;
       s.kind = lang === 'sds-svg' ? 'svg' : 'html-app'; s.title = (/<title>([^<]{1,120})<\/title>/i.exec(text) || [])[1] || ''; }
-    if (CARD_KINDS.indexOf(s.kind) < 0 || s.inlineWanted) return; // inline kinds appear when complete
+    if (s.inlineWanted) {
+      if (s.card) { s.card.remove(); s.card = null; }
+      hideSource(block.container, true);
+      claimDone(block.container);
+      var streamingView = Vw.current && Vw.current();
+      if (streamingView && streamingView.streamingText != null && s.key && streamingView.key === s.key) Vw.close();
+      return;
+    }
+    if (CARD_KINDS.indexOf(s.kind) < 0) return; // inline kinds appear when complete
     s.streaming = true; s.body = bodyText;
     ensureCard(block, s); paintCard(s);
     var cur = Vw.current && Vw.current();
@@ -304,7 +390,7 @@
         if (r.skip) { s.done = true; if (s.card) { s.card.remove(); s.card = null; } hideSource(block.container, false); unclaim(block.container); return; }
         if (r.ok) {
           s.done = true;
-          if (r.inline) s.inlineWanted = true;
+          s.inlineWanted = r.inline === true;
           if (s.inlineEl) { try { if (s.view) s.view.destroy(); } catch (_) {} s.inlineEl.remove(); s.inlineEl = null; }
           settle(block, s, r.block, r.raw);
           return;
