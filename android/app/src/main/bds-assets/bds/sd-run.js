@@ -137,15 +137,18 @@
     return count;
   }
 
-  function isAutoUserText(text) {
+  function isAutoUserText(text, role) {
     var tx = String(text || '');
+    // Explicit engine protocol markers override unreliable DOM role selectors.
     if (AUTO_RE.test(tx) || /SDS:AUTO_MCP/.test(tx)) return true;
-    return /\bmcp_results?(?:_[A-Za-z0-9_.-]+)?\.txt\b/.test(tx);
+    // Filename fallback is only for user messages; assistant prose may mention it.
+    return String(role || '').toLowerCase() === 'user' &&
+      /\bmcp_results?(?:_[A-Za-z0-9_.-]+)?\.txt\b/.test(tx);
   }
 
   /** Normalise protocol messages before grouping, independent of DOM role selectors. */
   function classifyMessage(role, text, loadingCalls, forceAuto) {
-    var auto = !!forceAuto || isAutoUserText(text);
+    var auto = !!forceAuto || isAutoUserText(text, role);
     if (auto) role = 'user';
     var calls = role === 'assistant'
       ? Math.max(Number(loadingCalls) || 0, rawCallCount(text))
@@ -386,9 +389,9 @@
   }
 
   /** An automatic message of the engine (tool results, an agent nudge). */
-  function isAutoUser(el) {
+  function isAutoUser(el, role) {
     if (el.querySelector('.bds-mcp-result-card, .bds-mcp-error-card')) return true;
-    if (isAutoUserText(el.textContent || '')) return true;
+    if (isAutoUserText(el.textContent || '', role)) return true;
     // A nudge is wiped by the engine's sanitiser, leaving nothing visible.
     return !!el.querySelector('.bds-hidden-message') && !visibleText(el);
   }
@@ -648,7 +651,7 @@
     var els = messageEls();
     var list = els.map(function (el) {
       var role = roleOf(el);
-      var auto = isAutoUser(el);
+      var auto = isAutoUser(el, role);
       return classifyMessage(role, el.textContent || '',
         role === 'assistant' ? el.querySelectorAll('.bds-mcp-loading').length : 0, auto);
     });
