@@ -511,6 +511,9 @@
   }
   (function hook() { var Ho = H(); if (Ho && Ho.onClaim) Ho.onClaim(function () { schedule(16); }); })();
   function teardown() {
+    // Cancel stale scans so work queued before a feature toggle cannot race with re-enable.
+    if (pending !== null) { clearTimeout(pending); pending = null; }
+    pendingAt = 0;
     doc.querySelectorAll('.sd-art,.sd-art-error,.sd-inline').forEach(function (n) { n.remove(); });
     doc.querySelectorAll('[data-sd-hidden="artifact"]').forEach(function (n) { n.removeAttribute('data-sd-hidden'); });
     states = new WeakMap();
@@ -529,5 +532,12 @@
       }
     }).observe(doc.body, { childList: true, subtree: true, characterData: true });
   }
-  if (root.addEventListener) root.addEventListener('sd-genui:config', function (e) { if (e.detail && e.detail.enabled === false) teardown(); else schedule(); });
+  if (root.addEventListener) root.addEventListener('sd-genui:config', function (e) {
+    if (e.detail && e.detail.enabled === false) teardown();
+    else {
+      // A fresh enable/config event is an explicit recovery boundary for the preview circuit.
+      if (e.detail && e.detail.enabled === true) { rendererFailureStreak = 0; rendererDisabled = false; }
+      schedule();
+    }
+  });
 })(window);
