@@ -159,6 +159,7 @@ test('raw call spans support name= and preserve prose around a call', () => {
   host.querySelectorAll = () => [];
   win.document.createElement = (tag) => el(tag.toUpperCase());
   assert.equal(run._protocolText(host), 'Before.  <SDS:AUTO:MCP url="sandbox" name="run">{"command":"ls"}</SDS:AUTO:MCP> After.');
+  assert.equal(run._protocolText(el('DIV', [example])), '', 'fenced code-only examples are excluded from protocol detection');
   const hidden = new Set();
   run._hideRawCallBlocks(host, hidden);
   assert.equal(hidden.size, 2, 'both DOM text segments of the split call are wrapped');
