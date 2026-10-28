@@ -20,7 +20,7 @@ Read "Not verified" before relying on anything here.
 | 16 KB page sizes | `fetch_sandbox_deps.py` measures `p_align` of every shipped library and reports per-ABI readiness; CI annotates each library that is still 4 KB aligned. It never blocks a build. |
 | Release identity | `repo-consistency.test.mjs` (new): `package.json` ↔ `versionName`, the `versionCode` ladder, the engine module list vs the bundle, and the version named in the build docs. |
 | File-preparation safety | Accessible English/Bengali progress and Stop; active reads/inflation abort, partial results are discarded, newer selections supersede stale work, and setup failures replay the original selection. |
-| Android stability CI | Instrumented coverage now runs on API 30, 34, and 35. Edge-to-edge tests verify insets and contrast-scrim policy without incorrectly requiring bars to remain transparent after page-color synchronization. Failure excerpts are surfaced in Actions annotations. |
+| Android stability CI | Instrumented coverage now runs on API 30, 34, and 35. Edge-to-edge checks verify window configuration and contrast-scrim policy; inset-padding behavior has deterministic coverage in `KeyboardInsetTest` (avoiding timing-sensitive reads from an emulator window surface). Failure excerpts are surfaced in Actions annotations. |
 
 **Latest same-branch verification:** Actions run [40689548284](https://github.com/themuhammad-personal/Super-Deepseek-/actions/runs/40689548284), commit `9a8c75e`, succeeded: Node/engine and compliance-harness tests, Chromium GenUI acceptance, Kotlin/Robolectric tests, release APK build/signature checks, and instrumented emulator tests on API 30/34/35. Lint is report-only; release publishing was skipped.
 
