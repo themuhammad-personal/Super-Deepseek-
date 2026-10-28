@@ -54,8 +54,22 @@ stops accepting such updates from **2027-02-01**.
   `python3 scripts/fetch_sandbox_deps.py --self-test` checks the reader.
 - CI turns each misaligned library into a warning annotation.
 - The libraries are **upstream** (Termux proot + talloc). Fixing them means
-  taking a Termux build that was linked with `-Wl,-z,max-page-size=16384`;
-  do not patch the ELF by hand.
+  taking a Termux build that was linked with `-Wl,-z,max-page-size=16384`, or
+  rebuilding proot + talloc from source with the NDK; do not patch the ELF by
+  hand.
+
+**Where it stands:** CI measures the 32-bit ABIs (`x86`, `armeabi-v7a`) and
+`libproot-loader32.so` at `0x1000` — they are not 16 KB ready. The report is
+per run and per library in the step summary, because GitHub caps the visible
+annotations at ten. 32-bit phones are not affected by 16 KB pages (the feature
+is 64-bit only); what matters is `arm64-v8a`, and Termux links for 4 KB pages,
+so treat the Linux sandbox on a 16 KB-page phone as **untested**.
+
+To test it: an Android 15+ emulator image with a 16 KB page size (Android Studio
+calls it "16 KB Page Size" in the AVD list, or `-page-size 16384` for
+`avdmanager`), then *Linux & Agent → Linux on this phone*; a failed `exec` of
+`libproot.so` in `logcat` is the failure mode. Do not raise `minSdk` or hide the
+sandbox without this test.
 
 The report never blocks a build: an app that cannot be built cannot be fixed.
 
