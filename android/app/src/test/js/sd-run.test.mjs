@@ -178,6 +178,8 @@ test('assistant examples and filenames are not automatic results without the pro
   assert.equal(run._isAutoUserText('[SDS:AUTO_MCP_RESULT]{"content":"ok"}[/SDS:AUTO_MCP_RESULT]', 'assistant'), false);
   assert.equal(run._isAutoUserText('<SuperDeepSeek>\n[SDS:AUTO] MCP Result for run @ sandbox\n' +
     '[SDS:AUTO_MCP_RESULT]\n{"content":"ok"}\n[/SDS:AUTO_MCP_RESULT]\n</SuperDeepSeek>', 'assistant'), true);
+  assert.equal(run._isAutoUserText('<BetterDeepSeek>\n[BDS:AUTO] MCP Result for run @ sandbox\n' +
+    '[BDS:AUTO_MCP_RESULT]\n{"content":"ok"}\n[/BDS:AUTO_MCP_RESULT]\n</BetterDeepSeek>', 'assistant'), true);
 });
 
 test('filename fallback applies only to user messages, not assistant prose', () => {
