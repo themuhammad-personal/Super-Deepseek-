@@ -37,7 +37,11 @@
   var ARCHIVE_EXT = /\.(zip|jar|war|apk|aab|xpi|crx|ipa|nupkg|whl|sketch|xd|kmz|cbz|vsix|mcpack)$/i;
 
   function isBn() {
-    try { return String(document.documentElement.lang || navigator.language || '').toLowerCase().indexOf('bn') === 0; } catch (_) { return false; }
+    try {
+      var e = window.__sdEngine;
+      var locale = e && typeof e.locale === 'function' ? String(e.locale() || '') : '';
+      return String(locale || document.documentElement.lang || navigator.language || '').toLowerCase().indexOf('bn') === 0;
+    } catch (_) { return false; }
   }
   function t(en, bn) { return isBn() ? bn : en; }
   function toast(msg) {
@@ -77,6 +81,7 @@
   }
   function isAV(file) { return /^(audio|video)\//i.test(file.type || '') || AV_EXT.test(file.name || ''); }
   function fmtSize(n) { return n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1024 ? Math.round(n / 1024) + ' KB' : n + ' B'; }
+  function checkCancelled(isCancelled) { if (isCancelled && isCancelled()) throw new Error('cancelled'); }
 
   // ── text detection ─────────────────────────────────────────────────────────
   function looksText(bytes) {
@@ -139,12 +144,16 @@
   // Streams the inflate and stops at `max` unpacked bytes. The sizes an archive
   // declares are not trusted: a zip bomb lies about them, and an unbounded
   // inflate would take the whole WebView (and the chat) down with it.
-  function inflateRaw(data, max) {
+  function inflateRaw(data, max, isCancelled) {
     if (typeof DecompressionStream !== 'function') return Promise.reject(new Error('this WebView cannot unzip'));
     var reader = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader();
     var chunks = [], total = 0;
+    function cancelReader() { try { var p = reader.cancel(); if (p && p.catch) p.catch(function () {}); } catch (_) {} }
+    var unsubscribe = isCancelled && isCancelled.subscribe ? isCancelled.subscribe(cancelReader) : null;
     function pump() {
+      if (isCancelled && isCancelled()) { cancelReader(); return Promise.reject(new Error('cancelled')); }
       return reader.read().then(function (r) {
+        if (isCancelled && isCancelled()) throw new Error('cancelled');
         if (r.done) {
           var out = new Uint8Array(total), o = 0;
           chunks.forEach(function (c) { out.set(c, o); o += c.length; });
@@ -152,40 +161,42 @@
         }
         total += r.value.length;
         if (total > max) {
-          try { reader.cancel(); } catch (_) {}
+          cancelReader();
           throw new Error('too large when unpacked');
         }
         chunks.push(r.value);
         return pump();
       });
     }
-    return pump();
+    return pump().then(function (out) { if (unsubscribe) unsubscribe(); return out; }, function (e) { if (unsubscribe) unsubscribe(); throw e; });
   }
-  function zipRead(b, e, max) {
+  function zipRead(b, e, max, isCancelled) {
+    if (isCancelled && isCancelled()) return Promise.reject(new Error('cancelled'));
     if (u32(b, e.local) !== 0x04034b50) return Promise.reject(new Error('bad zip entry'));
     var start = e.local + 30 + u16(b, e.local + 26) + u16(b, e.local + 28);
     var data = b.subarray(start, start + e.csize);
     max = max || DOC_PART_MAX;
     if (e.method === 0) return data.length > max ? Promise.reject(new Error('too large')) : Promise.resolve(data);
-    if (e.method === 8) return inflateRaw(data, max);
+    if (e.method === 8) return inflateRaw(data, max, isCancelled);
     return Promise.reject(new Error('compression method ' + e.method));
   }
-  function zipReadMany(b, entries, maxTotal) {
+  function zipReadMany(b, entries, maxTotal, isCancelled) {
     var total = 0, out = [];
     return entries.reduce(function (p, e) {
       return p.then(function () {
+        checkCancelled(isCancelled);
         var remain = maxTotal - total;
         if (remain <= 0) throw new Error('too large when unpacked');
-        return zipRead(b, e, Math.min(DOC_PART_MAX, remain)).then(function (bytes) {
+        return zipRead(b, e, Math.min(DOC_PART_MAX, remain), isCancelled).then(function (bytes) {
           total += bytes.length;
           out.push(bytes);
         });
       });
     }, Promise.resolve()).then(function () { return { bytes: total, entries: out }; });
   }
-  function zipTextsOf(b, entries, names, maxTotal) {
+  function zipTextsOf(b, entries, names, maxTotal, isCancelled) {
     var selected = names.map(function (name) { return entries.find(function (e) { return e.name === name; }); }).filter(Boolean);
-    return zipReadMany(b, selected, maxTotal).then(function (r) {
+    return zipReadMany(b, selected, maxTotal, isCancelled).then(function (r) {
       var i = 0;
       return {
         bytes: r.bytes,
@@ -193,9 +204,9 @@
       };
     });
   }
-  function zipTextOf(b, entries, name) {
+  function zipTextOf(b, entries, name, isCancelled) {
     var e = entries.find(function (x) { return x.name === name; });
-    return e ? zipRead(b, e).then(decode) : Promise.resolve('');
+    return e ? zipRead(b, e, DOC_PART_MAX, isCancelled).then(decode) : Promise.resolve('');
   }
 
   // ── format extractors (each returns markdown-ish plain text) ───────────────
@@ -205,21 +216,21 @@
       .replace(/<\/w:p>/g, '\n').replace(/<\/w:tc>/g, '\t').replace(/<\/w:tr>/g, '\n')
       .replace(/<[^>]+>/g, '')));
   }
-  function docx(b, en) {
+  function docx(b, en, isCancelled) {
     var parts = ['word/document.xml', 'word/footnotes.xml', 'word/endnotes.xml'];
-    return zipTextsOf(b, en, parts, DOC_TOTAL_MAX).then(function (r) {
+    return zipTextsOf(b, en, parts, DOC_TOTAL_MAX, isCancelled).then(function (r) {
       return r.texts.map(wordXml).filter(Boolean).join('\n\n---\n\n');
     });
   }
   function colIndex(ref) { var m = /^([A-Z]+)/.exec(ref || ''), n = 0; if (!m) return -1; for (var i = 0; i < m[1].length; i++) n = n * 26 + m[1].charCodeAt(i) - 64; return n - 1; }
-  function xlsx(b, en) {
-    return zipTextsOf(b, en, ['xl/sharedStrings.xml', 'xl/workbook.xml'], DOC_TOTAL_MAX).then(function (book) {
+  function xlsx(b, en, isCancelled) {
+    return zipTextsOf(b, en, ['xl/sharedStrings.xml', 'xl/workbook.xml'], DOC_TOTAL_MAX, isCancelled).then(function (book) {
       var shared = [];
       (book.texts[0].match(/<si>[\s\S]*?<\/si>/g) || []).forEach(function (si) { shared.push(entities((si.match(/<t[^>]*>([\s\S]*?)<\/t>/g) || []).map(function (x) { return x.replace(/<[^>]+>/g, ''); }).join(''))); });
       var names = (book.texts[1].match(/<sheet\b[^>]*name="([^"]*)"/g) || []).map(function (s) { return entities(/name="([^"]*)"/.exec(s)[1]); });
       var sheets = en.filter(function (e) { return /^xl\/worksheets\/sheet\d+\.xml$/.test(e.name); })
         .sort(function (a, c) { return parseInt(a.name.replace(/\D/g, ''), 10) - parseInt(c.name.replace(/\D/g, ''), 10); });
-      return zipTextsOf(b, en, sheets.map(function (s) { return s.name; }), DOC_TOTAL_MAX - book.bytes).then(function (sheetData) {
+      return zipTextsOf(b, en, sheets.map(function (s) { return s.name; }), DOC_TOTAL_MAX - book.bytes, isCancelled).then(function (sheetData) {
         return sheetData.texts.map(function (x, i) {
           var rows = [];
           (x.match(/<row\b[\s\S]*?<\/row>/g) || []).forEach(function (row) {
@@ -241,18 +252,18 @@
       });
     });
   }
-  function pptx(b, en) {
+  function pptx(b, en, isCancelled) {
     var slides = en.filter(function (e) { return /^ppt\/slides\/slide\d+\.xml$/.test(e.name); })
       .sort(function (a, c) { return parseInt(a.name.replace(/\D/g, ''), 10) - parseInt(c.name.replace(/\D/g, ''), 10); });
-    return zipTextsOf(b, en, slides.map(function (s) { return s.name; }), DOC_TOTAL_MAX).then(function (r) {
+    return zipTextsOf(b, en, slides.map(function (s) { return s.name; }), DOC_TOTAL_MAX, isCancelled).then(function (r) {
       return r.texts.map(function (x, i) {
         var paras = (x.match(/<a:p>[\s\S]*?<\/a:p>/g) || []).map(function (p) { return entities((p.match(/<a:t>([\s\S]*?)<\/a:t>/g) || []).map(function (q) { return q.replace(/<[^>]+>/g, ''); }).join('')); }).filter(Boolean);
         return '## Slide ' + (i + 1) + '\n' + paras.join('\n');
       }).join('\n\n');
     });
   }
-  function odf(b, en) {
-    return zipTextOf(b, en, 'content.xml').then(function (x) {
+  function odf(b, en, isCancelled) {
+    return zipTextOf(b, en, 'content.xml', isCancelled).then(function (x) {
       return tidy(entities(x
         .replace(/<text:tab\/>/g, '\t').replace(/<text:line-break\/>/g, '\n')
         .replace(/<text:s(?: text:c="(\d+)")?\/>/g, function (m, n) { return ' '.repeat(+n || 1); })
@@ -262,10 +273,10 @@
         .replace(/<[^>]+>/g, '')));
     });
   }
-  function epub(b, en) {
-    return zipTextsOf(b, en, ['META-INF/container.xml'], DOC_TOTAL_MAX).then(function (container) {
+  function epub(b, en, isCancelled) {
+    return zipTextsOf(b, en, ['META-INF/container.xml'], DOC_TOTAL_MAX, isCancelled).then(function (container) {
       var opfPath = (/full-path="([^"]+)"/.exec(container.texts[0]) || [])[1] || '';
-      return zipTextsOf(b, en, [opfPath], DOC_TOTAL_MAX - container.bytes).then(function (packageData) {
+      return zipTextsOf(b, en, [opfPath], DOC_TOTAL_MAX - container.bytes, isCancelled).then(function (packageData) {
         var opf = packageData.texts[0];
         var base = opfPath.indexOf('/') >= 0 ? opfPath.slice(0, opfPath.lastIndexOf('/') + 1) : '';
         var items = {};
@@ -273,13 +284,13 @@
         var order = (opf.match(/<itemref\b[^>]*idref="([^"]+)"/g) || []).map(function (r) { return items[/idref="([^"]+)"/.exec(r)[1]]; }).filter(Boolean);
         if (!order.length) order = en.filter(function (e) { return /\.x?html?$/i.test(e.name); }).map(function (e) { return e.name; }).sort();
         var title = entities(((/<dc:title[^>]*>([\s\S]*?)<\/dc:title>/.exec(opf) || [])[1]) || '');
-        return zipTextsOf(b, en, order, DOC_TOTAL_MAX - container.bytes - packageData.bytes).then(function (chapters) {
+        return zipTextsOf(b, en, order, DOC_TOTAL_MAX - container.bytes - packageData.bytes, isCancelled).then(function (chapters) {
           return (title ? '# ' + title + '\n\n' : '') + chapters.texts.map(htmlText).filter(Boolean).join('\n\n');
         });
       });
     });
   }
-  function archive(b, en, name) {
+  function archive(b, en, name, isCancelled) {
     var files = en.filter(function (e) { return !e.dir; });
     var lines = ['# Archive: ' + name, '', files.length + ' files, ' + fmtSize(files.reduce(function (s, e) { return s + e.usize; }, 0)) + ' uncompressed', '', '## Contents'];
     files.slice(0, 2000).forEach(function (e) { lines.push('- ' + e.name + ' (' + fmtSize(e.usize) + ')'); });
@@ -288,8 +299,9 @@
     var queue = files.filter(function (e) { return e.usize > 0 && e.usize <= ZIP_ENTRY_MAX && !IMAGE_EXT.test(e.name) && !AV_EXT.test(e.name) && !/(^|\/)(\.git|node_modules|__MACOSX)\//.test(e.name); });
     return queue.reduce(function (p, e) {
       return p.then(function () {
+        checkCancelled(isCancelled);
         if (budget <= 0) { skipped++; return; }
-        return zipRead(b, e, ZIP_ENTRY_MAX).then(function (bytes) {
+        return zipRead(b, e, ZIP_ENTRY_MAX, isCancelled).then(function (bytes) {
           if (!looksText(bytes)) return;
           var s = decode(bytes); if (s.length > budget) { s = s.slice(0, budget) + '\n… (truncated)'; }
           budget -= s.length;
@@ -328,10 +340,11 @@
     }
     return tidy(out);
   }
-  function binarySummary(bytes, file) {
+  function binarySummary(bytes, file, isCancelled) {
     var head = Array.prototype.map.call(bytes.subarray(0, 32), function (x) { return ('0' + x.toString(16)).slice(-2); }).join(' ');
     var strs = [], cur = '', total = 0, i = 0, chunkSize = 256 * 1024;
     function scanChunk() {
+      checkCancelled(isCancelled);
       var end = Math.min(bytes.length, i + chunkSize);
       for (; i < end && total < 400000; i++) {
         var c = bytes[i];
@@ -351,13 +364,33 @@
   }
 
   /** file → { text, kind } describing the file in plain text. */
-  function readBytes(file) {
+  function readBlob(blob, isCancelled) {
+    if (typeof FileReader !== 'function') return blob.arrayBuffer().then(function (ab) { checkCancelled(isCancelled); return ab; });
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader(), settled = false, unsubscribe = null;
+      function finish(fn, value) {
+        if (settled) return;
+        settled = true;
+        if (unsubscribe) unsubscribe();
+        reader.onload = reader.onerror = reader.onabort = null;
+        fn(value);
+      }
+      function cancel() { try { reader.abort(); } catch (_) {} finish(reject, new Error('cancelled')); }
+      reader.onload = function () { if (isCancelled && isCancelled()) cancel(); else finish(resolve, reader.result); };
+      reader.onerror = function () { finish(reject, reader.error || new Error('file read failed')); };
+      reader.onabort = function () { finish(reject, new Error('cancelled')); };
+      if (isCancelled && isCancelled.subscribe) unsubscribe = isCancelled.subscribe(cancel);
+      if (isCancelled && isCancelled()) { cancel(); return; }
+      try { reader.readAsArrayBuffer(blob); } catch (e) { finish(reject, e); }
+    });
+  }
+  function readBytes(file, isCancelled) {
     // Archives need their central directory at the end, so they are read whole
     // (≤ 100 MB). Anything else only needs as much text as can be uploaded.
-    if (file.size <= TEXT_READ_MAX) return file.arrayBuffer().then(function (ab) { return { b: new Uint8Array(ab), cut: false }; });
-    return file.slice(0, 8).arrayBuffer().then(function (h) {
-      if (isZip(new Uint8Array(h))) return file.arrayBuffer().then(function (ab) { return { b: new Uint8Array(ab), cut: false }; });
-      return file.slice(0, TEXT_READ_MAX).arrayBuffer().then(function (ab) { return { b: new Uint8Array(ab), cut: true }; });
+    if (file.size <= TEXT_READ_MAX) return readBlob(file, isCancelled).then(function (ab) { return { b: new Uint8Array(ab), cut: false }; });
+    return readBlob(file.slice(0, 8), isCancelled).then(function (h) {
+      if (isZip(new Uint8Array(h))) return readBlob(file, isCancelled).then(function (ab) { return { b: new Uint8Array(ab), cut: false }; });
+      return readBlob(file.slice(0, TEXT_READ_MAX), isCancelled).then(function (ab) { return { b: new Uint8Array(ab), cut: true }; });
     });
   }
   function utf16(b) {
@@ -365,16 +398,18 @@
     if (b.length >= 2 && b[0] === 0xfe && b[1] === 0xff) return 'utf-16be';
     return '';
   }
-  function extract(file) {
-    return readBytes(file).then(function (rb) {
-      return extractBytes(file, rb.b).then(function (r) {
+  function extract(file, isCancelled) {
+    return readBytes(file, isCancelled).then(function (rb) {
+      checkCancelled(isCancelled);
+      return extractBytes(file, rb.b, isCancelled).then(function (r) {
         if (rb.cut && r.text) r.text += '\n\n[' + t('Only the first ' + fmtSize(TEXT_READ_MAX) + ' of this ' + fmtSize(file.size) + ' file was read.', 'এই ' + fmtSize(file.size) + ' ফাইলের শুধু প্রথম ' + fmtSize(TEXT_READ_MAX) + ' পড়া হয়েছে।') + ']';
         return r;
       });
     });
   }
-  function extractBytes(file, b) {
+  function extractBytes(file, b, isCancelled) {
     return Promise.resolve().then(function () {
+      checkCancelled(isCancelled);
       var ext = extOf(file.name), wide = utf16(b);
       if (wide) {
         var w = '';
@@ -383,12 +418,12 @@
       }
       if (isZip(b)) {
         var en = zipEntries(b), has = function (n) { return en.some(function (e) { return e.name === n; }); };
-        if (has('word/document.xml')) return docx(b, en).then(function (s) { return { text: s, kind: 'Word document' }; });
-        if (has('xl/workbook.xml')) return xlsx(b, en).then(function (s) { return { text: s, kind: 'spreadsheet' }; });
-        if (has('ppt/presentation.xml')) return pptx(b, en).then(function (s) { return { text: s, kind: 'presentation' }; });
-        if (has('content.xml') && has('mimetype')) return odf(b, en).then(function (s) { return { text: s, kind: 'OpenDocument' }; });
-        if (has('META-INF/container.xml')) return epub(b, en).then(function (s) { return { text: s, kind: 'e-book' }; });
-        return archive(b, en, file.name).then(function (s) { return { text: s, kind: 'archive' }; });
+        if (has('word/document.xml')) return docx(b, en, isCancelled).then(function (s) { return { text: s, kind: 'Word document' }; });
+        if (has('xl/workbook.xml')) return xlsx(b, en, isCancelled).then(function (s) { return { text: s, kind: 'spreadsheet' }; });
+        if (has('ppt/presentation.xml')) return pptx(b, en, isCancelled).then(function (s) { return { text: s, kind: 'presentation' }; });
+        if (has('content.xml') && has('mimetype')) return odf(b, en, isCancelled).then(function (s) { return { text: s, kind: 'OpenDocument' }; });
+        if (has('META-INF/container.xml')) return epub(b, en, isCancelled).then(function (s) { return { text: s, kind: 'e-book' }; });
+        return archive(b, en, file.name, isCancelled).then(function (s) { return { text: s, kind: 'archive' }; });
       }
       if (ext === '.rtf' || /^\{\\rtf/.test(decode(b.subarray(0, 8)))) return { text: rtf(decode(b)), kind: 'RTF document' };
       if (looksText(b)) {
@@ -396,7 +431,7 @@
         if (/\.(x?html?|xht)$/i.test(file.name)) return { text: s, kind: 'web page' };
         return { text: s, kind: 'text' };
       }
-      return binarySummary(b, file).then(function (text) { return { text: text, kind: 'binary' }; });
+      return binarySummary(b, file, isCancelled).then(function (text) { return { text: text, kind: 'binary' }; });
     });
   }
 
@@ -414,38 +449,84 @@
     return out;
   }
 
-  /** Files the input would refuse → converted Files. Returns { files, notes }. */
-  function convertAll(list, input) {
-    var accept = acceptOf(input), notes = [], out = [];
+  /** Files the input would refuse → converted Files. Reports per-file progress and honors Stop. */
+  function convertAll(list, input, options) {
+    options = options || {};
+    var accept = acceptOf(input), notes = [], out = [], completed = 0, cancelled = false;
+    function stopped() { return !!(options.isCancelled && options.isCancelled()); }
+    if (options.isCancelled && options.isCancelled.subscribe) stopped.subscribe = options.isCancelled.subscribe;
+    function report(file, phase) {
+      if (!options.onProgress) return;
+      try { options.onProgress({ total: list.length, completed: completed, current: file.name, phase: phase }); } catch (_) {}
+    }
     return list.reduce(function (p, f) {
       return p.then(function () {
-        if (isAV(f)) { notes.push(t(f.name + ': audio and video are not supported', f.name + ': অডিও ও ভিডিও সমর্থিত নয়')); return; }
-        if (f.size > MAX_INPUT) { notes.push(t(f.name + ': larger than 100 MB', f.name + ': ১০০ MB-এর বেশি')); return; }
-        if (accepts(accept, f)) { out.push(f); return; }
-        return extract(f).then(function (r) {
+        if (stopped()) { cancelled = true; return; }
+        report(f, 'reading');
+        function finish() { completed++; report(f, 'ready'); }
+        if (isAV(f)) { notes.push(t(f.name + ': audio and video are not supported', f.name + ': অডিও ও ভিডিও সমর্থিত নয়')); finish(); return; }
+        if (f.size > MAX_INPUT) { notes.push(t(f.name + ': larger than 100 MB', f.name + ': ১০০ MB-এর বেশি')); finish(); return; }
+        if (accepts(accept, f)) { out.push(f); finish(); return; }
+        return extract(f, stopped).then(function (r) {
+          if (stopped()) { cancelled = true; return; }
           var text = String(r.text || '').trim();
-          if (!text) { notes.push(t(f.name + ': no readable text found', f.name + ': পড়ার মতো লেখা পাওয়া যায়নি')); return; }
+          if (!text) { notes.push(t(f.name + ': no readable text found', f.name + ': পড়ার মতো লেখা পাওয়া যায়নি')); finish(); return; }
           var parts = partsOf(f.name, text, r.kind);
           parts.forEach(function (x) { out.push(x); });
           notes.push(parts.length > 1
             ? t(f.name + ' → text, split into ' + parts.length + ' parts', f.name + ' → টেক্সট, ' + parts.length + ' ভাগে')
             : t(f.name + ' → read on device as text', f.name + ' → ডিভাইসে টেক্সট হিসেবে পড়া হয়েছে'));
+          finish();
         }, function (e) {
+          if (stopped() || (e && e.message === 'cancelled')) { cancelled = true; return; }
           notes.push(t(f.name + ': could not be read (' + (e && e.message || e) + ')', f.name + ': পড়া যায়নি (' + (e && e.message || e) + ')'));
+          finish();
         });
       });
-    }, Promise.resolve()).then(function () { return { files: out, notes: notes }; });
+    }, Promise.resolve()).then(function () { return { files: out, notes: notes, cancelled: cancelled || stopped() }; });
   }
 
   function needsWork(f, input) { return isAV(f) || f.size > MAX_INPUT || !accepts(acceptOf(input), f); }
 
   // ── the change-event hand-off ──────────────────────────────────────────────
   var ours = typeof WeakSet === 'function' ? new WeakSet() : null;
-  var pendingChanges = typeof WeakMap === 'function' ? new WeakMap() : null, changeSequence = 0;
+  var pendingChanges = typeof WeakMap === 'function' ? new WeakMap() : null, activeTasks = typeof WeakMap === 'function' ? new WeakMap() : null, changeSequence = 0;
+  function progressCard(total, onStop) {
+    var root = null, title = null, detail = null, bar = null, closed = false;
+    try {
+      root = document.createElement('div'); root.className = 'sd-files-progress'; root.setAttribute('role', 'status'); root.setAttribute('aria-live', 'polite');
+      var spin = document.createElement('span'); spin.className = 'sd-spin'; spin.setAttribute('aria-hidden', 'true');
+      var body = document.createElement('div'); body.className = 'sd-files-progress-main';
+      title = document.createElement('div'); title.className = 'sd-files-progress-title'; title.textContent = t('Preparing files…', 'ফাইল প্রস্তুত হচ্ছে…');
+      detail = document.createElement('div'); detail.className = 'sd-files-progress-detail';
+      bar = document.createElement('progress'); bar.className = 'sd-files-progress-bar'; bar.max = Math.max(1, total); bar.value = 0;
+      bar.setAttribute('aria-label', t('File preparation progress', 'ফাইল প্রস্তুতির অগ্রগতি'));
+      body.append(title, detail, bar);
+      var stop = document.createElement('button'); stop.type = 'button'; stop.className = 'sd-chip sd-files-progress-stop'; stop.textContent = t('Stop', 'থামান');
+      stop.addEventListener('click', onStop);
+      root.append(spin, body, stop);
+      (document.body || document.documentElement).appendChild(root);
+    } catch (_) { root = null; }
+    return {
+      update: function (p) {
+        if (closed || !root) return;
+        var itemNo = p.phase === 'ready' ? p.completed : p.completed + 1;
+        title.textContent = p.phase === 'ready'
+          ? t('Prepared ' + p.completed + ' of ' + p.total, 'প্রস্তুত হয়েছে ' + p.completed + ' / ' + p.total)
+          : t('Preparing ' + itemNo + ' of ' + p.total, 'প্রস্তুত হচ্ছে ' + itemNo + ' / ' + p.total);
+        detail.textContent = p.current;
+        bar.max = Math.max(1, p.total); bar.value = p.completed;
+        bar.setAttribute('aria-valuetext', t(itemNo + ' of ' + p.total + ': ' + p.current, p.total + '-এর মধ্যে ' + itemNo + ': ' + p.current));
+      },
+      close: function () { closed = true; if (root && root.parentNode) root.parentNode.removeChild(root); }
+    };
+  }
   function onChange(e) {
     var input = e.target;
     if (!input || input.tagName !== 'INPUT' || input.type !== 'file') return;
     if (ours && ours.has(e)) return;
+    var previous = activeTasks && activeTasks.get(input);
+    if (previous) previous.stop(false, false);
     var token = ++changeSequence;
     if (pendingChanges) pendingChanges.set(input, token);
     if (input.closest && input.closest('#bds-root, .bds-attach-wrapper, [data-sd-owned]')) return;
@@ -453,20 +534,48 @@
     if (!list.length || !list.some(function (f) { return needsWork(f, input); })) return;
     e.stopImmediatePropagation();
     e.stopPropagation();
-    toast(t('Preparing files…', 'ফাইল প্রস্তুত হচ্ছে…'));
+    var task = { cancelled: false, stop: null, progress: null, cancelListeners: [] };
+    task.progress = progressCard(list.length, function () { task.stop(true, true); });
+    task.stop = function (notify, invalidate) {
+      if (task.cancelled) return;
+      task.cancelled = true;
+      task.cancelListeners.slice().forEach(function (cancel) { try { cancel(); } catch (_) {} });
+      task.cancelListeners.length = 0;
+      task.progress.close();
+      if (activeTasks && activeTasks.get(input) === task) activeTasks.delete(input);
+      if (invalidate && pendingChanges) pendingChanges.set(input, ++changeSequence);
+      if (notify) toast(t('Stopped. No files were attached; select them again when ready.', 'থামানো হয়েছে। কোনো ফাইল যুক্ত হয়নি; প্রস্তুত হলে আবার নির্বাচন করুন।'));
+    };
+    if (activeTasks) activeTasks.set(input, task);
     function replayChange() {
       var ev = new Event('change', { bubbles: true });
       if (ours) ours.add(ev);
       input.dispatchEvent(ev);
     }
-    function isCurrent() { return !pendingChanges || pendingChanges.get(input) === token; }
+    function isCurrent() { return !task.cancelled && (!pendingChanges || pendingChanges.get(input) === token); }
+    function isCancelled() { return !isCurrent(); }
+    isCancelled.subscribe = function (cancel) {
+      if (isCancelled()) { cancel(); return function () {}; }
+      task.cancelListeners.push(cancel);
+      return function () { task.cancelListeners = task.cancelListeners.filter(function (x) { return x !== cancel; }); };
+    };
+    function finish() {
+      task.progress.close();
+      if (activeTasks && activeTasks.get(input) === task) activeTasks.delete(input);
+    }
     function keepOriginals() {
       if (!isCurrent()) return;
+      finish();
       toast(t('Could not prepare files; the original selection was kept.', 'ফাইল প্রস্তুত করা যায়নি; মূল নির্বাচন রাখা হয়েছে।'));
       try { replayChange(); } catch (err) { console.warn('[SD files] could not replay original selection', err); }
     }
-    convertAll(list, input).then(function (r) {
+    convertAll(list, input, {
+      isCancelled: isCancelled,
+      onProgress: function (p) { if (isCurrent()) task.progress.update(p); },
+    }).then(function (r) {
       if (!isCurrent()) return;
+      finish();
+      if (r.cancelled) return;
       if (r.notes.length) toast(r.notes.slice(0, 3).join(' · ') + (r.notes.length > 3 ? ' …' : ''));
       if (!r.files.length) return;
       try {

@@ -54,6 +54,7 @@ test('stylesheet covers inline visuals, artifact cards/viewer, reduced motion an
   assert.ok(CSS.includes('prefers-reduced-motion:reduce'), 'reduced motion');
   for (const sel of ['.sd-vis{', '.sd-art{', '.sd-viewer{', '.sd-viewer-head', '.sd-seg', '.sd-code-gutter', '.sd-mcp{', '.sd-menu{', '[data-sd-hidden]']) assert.ok(CSS.includes(sel), sel);
   assert.ok(CSS.includes(':root[data-sd-theme=dark]'), 'host-theme driven dark tokens');
+  assert.ok(CSS.includes('.sd-files-progress{') && CSS.includes('.sd-files-progress-stop'), 'file preparation progress and Stop styles');
   assert.ok(!CSS.includes('.sd-artifact-'), 'old card-in-card artifact styles removed');
 });
 
