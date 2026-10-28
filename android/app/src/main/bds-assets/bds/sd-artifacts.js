@@ -403,6 +403,7 @@
     doc.querySelectorAll('.sd-art,.sd-art-error,.sd-inline').forEach(function (n) { n.remove(); });
     doc.querySelectorAll('[data-sd-hidden="artifact"]').forEach(function (n) { n.removeAttribute('data-sd-hidden'); });
     states = new WeakMap();
+    rendererFailureStreak = 0; rendererDisabled = false;
     if (V()) V().close();
   }
 
