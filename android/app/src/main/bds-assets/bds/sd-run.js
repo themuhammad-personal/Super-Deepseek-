@@ -111,7 +111,10 @@
       if (i === keyStart) { i++; continue; }
       var key = s.slice(keyStart, i).toLowerCase();
       while (i < s.length && /\s/.test(s[i])) i++;
-      if (s[i] !== '=') continue;
+      if (s[i] !== '=') {
+        if (i < s.length) i++;
+        continue;
+      }
       i++;
       while (i < s.length && /\s/.test(s[i])) i++;
       if (i >= s.length) break;
