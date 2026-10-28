@@ -130,6 +130,36 @@ test('viewer: describe/sourceOf/frameKind cover every artifact kind', () => {
   assert.match(V.sourceOf({ kind: 'html-app', payload: { html: '<p>x</p>', css: 'p{}', js: 'go()' } }), /<style>\s*p\{\}\s*<\/style>[\s\S]*<p>x<\/p>[\s\S]*go\(\)/);
   assert.equal(V.sourceOf({ kind: 'svg', payload: { svg: '<svg/>' } }), '<svg/>');
   assert.equal(V.sourceOf({ kind: 'react', payload: { source: 'export default 1' } }), 'export default 1');
+  for (const [language, ext] of [['csv', 'csv'], ['tsv', 'tsv'], ['jsonl', 'jsonl'], ['toml', 'toml'], ['graphql', 'graphql'], ['ipynb', 'ipynb'], ['dockerfile', 'dockerfile'], ['makefile', 'makefile']]) assert.equal(V.describe('code', { language }).ext, ext, language);
+  assert.equal(V.fileName('report.csv', 'csv'), 'report.csv');
+  assert.equal(V.fileName('README.md', 'md'), 'readme.md');
+  assert.equal(V.fileName('Dockerfile', 'dockerfile'), 'Dockerfile');
+  assert.equal(V.fileName('.env', 'env'), '.env');
+});
+
+test('protocol: common data/config labels normalize to non-executable code artifacts', () => {
+  const { window } = load(['sd-genui-protocol.js']), P = window.__sdGenUIProtocol;
+  for (const language of ['csv','tsv','jsonl','json5','ini','env','dotenv','properties','conf','config','graphql','gql','proto','protobuf','dockerfile','makefile','ipynb','txt','log','diff','ps1','powershell']) {
+    const r = P.parseBlock('id: output-file\\nkind: ' + language + '\\ntitle: output.' + language + '\\n---\\nvalue = 1');
+    assert.equal(r.ok, true, language + ': ' + r.error);
+    assert.equal(r.block.kind, 'code', language);
+    assert.equal(r.block.payload.language, language);
+  }
+});
+
+test('prompt: explicit file requests select artifact guidance in auto mode (English + Bengali)', () => {
+  const { window } = load(['sd-genui-prompt.js']), P = window.__sdGenUIPrompt;
+  P.resetConfig();
+  for (const request of ['Create a file named config.yaml','Generate a CSV spreadsheet with example rows','Write a Python script and save it as cleanup.py','একটি README.md ফাইল তৈরি করো']) {
+    P._resetTurns();
+    assert.equal(P.shouldInject(request, {}, P.getConfig()), true, request);
+    const prompt = P.build(request);
+    assert.match(prompt, /sds-genui — artifacts/);
+    assert.match(prompt, /File-first contract/);
+    assert.ok(P.selectModules(request, P.getConfig(), {}).includes('apps'));
+  }
+  P._resetTurns();
+  assert.equal(P.shouldInject('How do file extensions work?', {}, P.getConfig()), false);
 });
 
 test('mcp: uiOf follows the 2026-01-26 MCP Apps spec (nested + deprecated flat key, ui:// only)', () => {

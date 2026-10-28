@@ -172,6 +172,44 @@ try {
     await ctx.close();
   });
 
+  await test('02d renderer failure becomes a source-only downloadable artifact', async () => {
+    const { ctx, page, errors } = await fresh();
+    await page.evaluate(() => {
+      delete window.__sdGenUI;
+      const md = fx.message();
+      fx.classic(md, 'sds-genui', JSON.stringify({ version: 1, id: 'fallback-widget', kind: 'ui', title: 'Fallback Widget', payload: { spec: { version: 1, components: [] } } }));
+    });
+    const card = page.locator('.sd-art[data-kind="code"]');
+    await card.waitFor({ timeout: 5000 });
+    assert.match(await card.locator('.sd-art-title').textContent() || '', /Fallback Widget/);
+    assert.match(await card.locator('.sd-art-sub').textContent() || '', /source only/i);
+    assert.equal(await page.locator('.sd-art-error').count(), 0);
+    await card.click();
+    await page.locator('#sd-viewer .sd-code').waitFor({ timeout: 5000 });
+    assert.match(await page.locator('#sd-viewer .sd-code').textContent() || '', /components/);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
+
+  await test('02e malformed typed output remains downloadable as source instead of only an error card', async () => {
+    const { ctx, page, errors } = await fresh();
+    await page.evaluate(() => {
+      const md = fx.message();
+      fx.block(md, 'sds-genui', 'id: broken-widget\\nkind: ui\\ntitle: Broken Widget\\n---\\n{not valid JSON');
+      fx.para(md, 'done');
+    });
+    const card = page.locator('.sd-art[data-kind="code"]');
+    await card.waitFor({ timeout: 7000 });
+    assert.match(await card.locator('.sd-art-title').textContent() || '', /Broken Widget/);
+    assert.match(await card.locator('.sd-art-sub').textContent() || '', /source only/i);
+    assert.equal(await page.locator('.sd-art-error').count(), 0);
+    await card.click();
+    await page.locator('#sd-viewer .sd-code').waitFor({ timeout: 5000 });
+    assert.match(await page.locator('#sd-viewer .sd-code').textContent() || '', /not valid JSON/);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
+
   await test('03 streaming: card shows "Generating…", viewer streams code, then exactly one card and live preview', async () => {
     const { ctx, page, errors } = await fresh();
     await page.evaluate(() => { window.__md = fx.message(); window.__pre = fx.block(window.__md, 'sds-genui', ''); });

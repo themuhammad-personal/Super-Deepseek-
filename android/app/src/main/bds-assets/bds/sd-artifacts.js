@@ -8,7 +8,7 @@
  *
  * Kinds that belong in the answer itself (ui widgets, tool results, MCP apps,
  * and anything marked "presentation: inline") render inline instead.
- * If anything fails the original code block stays visible.
+ * If a renderer fails, the engine falls back to a non-executable source artifact; the original code remains available as a final fallback.
  */
 (function (root) {
   'use strict';
@@ -105,7 +105,7 @@
       state.cardTile.appendChild(Vw.icon(info.icon, 20));
       var rec = state.key ? Vw.store.get(state.key) : null;
       var n = rec ? rec.versions.length : 1;
-      state.cardSub.textContent = (kind === 'code' ? info.label + ' · ' + info.short : info.label + ' · ' + info.short) + (n > 1 ? ' · ' + t('Version ', 'ভার্সন ') + (state.versionIndex + 1) : '');
+      state.cardSub.textContent = info.label + ' · ' + info.short + (n > 1 ? ' · ' + t('Version ', 'ভার্সন ') + (state.versionIndex + 1) : '') + (state.fallbackSource ? ' · ' + t('Source only', 'শুধু সোর্স') : '');
       state.cardDl.hidden = false;
     }
   }
@@ -179,6 +179,71 @@
     hideSource(block.container, true);
     claimDone(block.container);
   }
+  function sourceForArtifact(art) {
+    var p = art && art.payload || {}, Vw = V(), out = '';
+    try {
+      if (art.kind === 'ui') return JSON.stringify(p.spec, null, 2);
+      if (art.kind === 'tool-result') return JSON.stringify(p.result, null, 2);
+      if (art.kind === 'mcp-app') return JSON.stringify({ resourceUri: p.resourceUri, view: p.view || 'app' }, null, 2);
+      if (Vw && Vw.sourceOf) out = Vw.sourceOf(art);
+    } catch (_) {}
+    if (typeof out === 'string' && out.trim()) return out;
+    try { return JSON.stringify(p, null, 2); } catch (_) { return ''; }
+  }
+  function languageForArtifact(art) {
+    var p = art && art.payload || {};
+    if (art.kind === 'code') return p.language || 'text';
+    if (art.kind === 'document') return 'markdown';
+    if (art.kind === 'html-app') return 'html';
+    if (art.kind === 'svg') return 'svg';
+    if (art.kind === 'react') return 'jsx';
+    if (art.kind === 'mermaid') return 'mermaid';
+    if (art.kind === 'ui' || art.kind === 'tool-result' || art.kind === 'mcp-app') return 'json';
+    return 'text';
+  }
+  function fallbackId(source, preferred) {
+    var raw = preferred || '';
+    if (!raw && /^\s*\{/.test(source)) { try { var v = JSON.parse(source); raw = v && (v.id || v.title) || ''; } catch (_) {} }
+    if (!raw) raw = headerValue(source, 'id') || headerValue(source, 'title') || 'artifact-source';
+    var id = String(raw).replace(/[^A-Za-z0-9_-]/g, '-').replace(/^-+/, '');
+    if (!/^[A-Za-z]/.test(id)) id = 'artifact-' + id;
+    return id.slice(0, 64) || 'artifact-source';
+  }
+  function fallbackTitle(source) {
+    var title = '';
+    if (/^\s*\{/.test(source)) { try { var v = JSON.parse(source); title = v && typeof v.title === 'string' ? v.title : ''; } catch (_) {} }
+    return String(title || headerValue(source, 'title') || t('Artifact source', 'আর্টিফ্যাক্ট সোর্স')).slice(0, 160);
+  }
+  function sourceLanguage(source) {
+    if (/^\s*\{/.test(source)) { try { JSON.parse(source); return 'json'; } catch (_) {} }
+    return 'text';
+  }
+  function sourceFallback(block, s, source, title, language, reason, id) {
+    source = String(source == null ? '' : source);
+    if (!source.trim() || source.length > 300000) return false;
+    var Vw = V();
+    if (!Vw || !Vw.store || typeof Vw.store.upsert !== 'function') return false;
+    var artifactId = fallbackId(source, id);
+    var cleanTitle = String(title || fallbackTitle(source)).slice(0, 160);
+    var payload = { code: source, language: String(language || 'text').slice(0, 24) };
+    try {
+      var res = Vw.store.upsert(artifactId, { kind: 'code', title: cleanTitle, payload: payload });
+      if (!res || !res.record) return false;
+      if (s.view) { try { s.view.destroy(); } catch (_) {} s.view = null; }
+      if (s.inlineEl) { try { s.inlineEl.remove(); } catch (_) {} s.inlineEl = null; }
+      var next = block.container && block.container.nextElementSibling;
+      if (next && next.classList && next.classList.contains('sd-inline') && next.getAttribute('data-sd-owned') === 'inline') next.remove();
+      if (s.errorEl) { s.errorEl.remove(); s.errorEl = null; }
+      s.artifactId = artifactId; s.key = res.record.key; s.versionIndex = res.index;
+      s.kind = 'code'; s.title = cleanTitle; s.payload = payload; s.streaming = false;
+      s.inlineWanted = false; s.fallbackSource = true;
+      ensureCard(block, s); paintCard(s);
+      var cur = Vw.current && Vw.current();
+      if (cur && cur.key === s.key && cur.streamingText != null) cur.stream(null, true);
+      record('source-fallback', cleanTitle, String(reason || 'renderer unavailable').slice(0, 160));
+      return true;
+    } catch (_) { return false; }
+  }
   /** Polished, quiet failure surface shared by every renderer (exported). */
   function errorCard(o) {
     var Vw = V();
@@ -225,20 +290,27 @@
   function settle(block, s, art, raw) {
     var Vw = V();
     if (s.errorEl) { s.errorEl.remove(); s.errorEl = null; }
-    if (CARD_KINDS.indexOf(art.kind) < 0 || (s.inlineWanted && ['svg', 'html-app', 'mermaid'].indexOf(art.kind) >= 0)) {
-      if (s.card) { s.card.remove(); s.card = null; }
-      renderInline(block, s, art);
-      record('render', art.title, art.kind + ' · inline');
-      return;
+    s.artifactId = art.id;
+    try {
+      if (CARD_KINDS.indexOf(art.kind) < 0 || (s.inlineWanted && ['svg', 'html-app', 'mermaid'].indexOf(art.kind) >= 0)) {
+        if (s.card) { s.card.remove(); s.card = null; }
+        renderInline(block, s, art);
+        s.fallbackSource = false;
+        record('render', art.title, art.kind + ' · inline');
+        return;
+      }
+      var res = Vw.store.upsert(art.id, { kind: art.kind, title: art.title, payload: art.payload, revision: art.revision });
+      s.key = res.record.key; s.versionIndex = res.index;
+      s.kind = art.kind; s.title = art.title; s.payload = art.payload; s.streaming = false; s.fallbackSource = false;
+      ensureCard(block, s);
+      paintCard(s);
+      var cur = Vw.current && Vw.current();
+      if (cur && cur.key === s.key && cur.streamingText != null) cur.stream(null, true);
+      record('render', art.title, art.kind + (raw ? ' (auto-detected)' : '') + ' · v' + (res.index + 1));
+    } catch (e) {
+      var message = String(e && e.message || e).slice(0, 200);
+      if (!sourceFallback(block, s, sourceForArtifact(art), art.title, languageForArtifact(art), message, art.id)) showError(s, block, message);
     }
-    var res = Vw.store.upsert(art.id, { kind: art.kind, title: art.title, payload: art.payload, revision: art.revision });
-    s.key = res.record.key; s.versionIndex = res.index;
-    s.kind = art.kind; s.title = art.title; s.payload = art.payload; s.streaming = false;
-    ensureCard(block, s);
-    paintCard(s);
-    var cur = Vw.current && Vw.current();
-    if (cur && cur.key === s.key && cur.streamingText != null) cur.stream(null, true);
-    record('render', art.title, art.kind + (raw ? ' (auto-detected)' : '') + ' · v' + (res.index + 1));
   }
   function record(type, title, detail) { var Ho = H(); try { if (Ho && Ho.ledger) Ho.ledger.record({ type: type, title: title, detail: detail, state: 'rendered', endedAt: Date.now() }); } catch (_) {} }
   function streamingPreview(block, s, text, lang) {
@@ -293,8 +365,9 @@
         }
         if (r.waiting && !final) { waiting = true; if (typed || text.length > 200) streamingPreview(block, s, text, lang); return; }
         s.done = true;
-        if (typed) showError(s, block, r.error);
-        else { if (s.card) { s.card.remove(); s.card = null; } hideSource(block.container, false); unclaim(block.container); }
+        if (typed) {
+          if (!sourceFallback(block, s, text, fallbackTitle(text), sourceLanguage(text), r.error, fallbackId(text))) showError(s, block, r.error);
+        } else { if (s.card) { s.card.remove(); s.card = null; } hideSource(block.container, false); unclaim(block.container); }
       });
     });
     if (waiting) schedule(STABLE_MS + 60);

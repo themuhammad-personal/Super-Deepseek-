@@ -48,7 +48,7 @@
   }
 
   /* ---------------- kinds ---------------- */
-  var EXT = { javascript: 'js', js: 'js', typescript: 'ts', ts: 'ts', python: 'py', py: 'py', html: 'html', css: 'css', json: 'json', java: 'java', kotlin: 'kt', c: 'c', cpp: 'cpp', 'c++': 'cpp', csharp: 'cs', 'c#': 'cs', go: 'go', rust: 'rs', ruby: 'rb', php: 'php', swift: 'swift', bash: 'sh', shell: 'sh', sh: 'sh', sql: 'sql', yaml: 'yaml', yml: 'yaml', markdown: 'md', md: 'md', xml: 'xml', dart: 'dart', lua: 'lua', r: 'r' };
+  var EXT = { javascript: 'js', js: 'js', typescript: 'ts', ts: 'ts', python: 'py', py: 'py', html: 'html', css: 'css', json: 'json', jsonl: 'jsonl', json5: 'json5', java: 'java', kotlin: 'kt', c: 'c', cpp: 'cpp', 'c++': 'cpp', csharp: 'cs', 'c#': 'cs', go: 'go', rust: 'rs', ruby: 'rb', php: 'php', swift: 'swift', bash: 'sh', shell: 'sh', sh: 'sh', sql: 'sql', yaml: 'yaml', yml: 'yml', toml: 'toml', ini: 'ini', env: 'env', dotenv: 'env', properties: 'properties', conf: 'conf', config: 'conf', csv: 'csv', tsv: 'tsv', graphql: 'graphql', gql: 'gql', proto: 'proto', protobuf: 'proto', dockerfile: 'dockerfile', makefile: 'makefile', ipynb: 'ipynb', ps1: 'ps1', powershell: 'ps1', mermaid: 'mmd', svg: 'svg', jsx: 'jsx', tsx: 'tsx', markdown: 'md', md: 'md', xml: 'xml', dart: 'dart', lua: 'lua', r: 'r', scala: 'scala', perl: 'pl', haskell: 'hs', elixir: 'ex', zig: 'zig', groovy: 'groovy', gradle: 'gradle', kts: 'kts', bat: 'bat', batch: 'bat', log: 'log', diff: 'diff', txt: 'txt' };
   function describe(kind, payload) {
     payload = payload || {};
     switch (kind) {
@@ -292,7 +292,14 @@
       try { if (root.navigator.clipboard && root.navigator.clipboard.writeText) root.navigator.clipboard.writeText(text).then(ok, legacy); else legacy(); } catch (_) { legacy(); }
     });
   }
-  function fileName(title, ext) { return (String(title || 'artifact').toLowerCase().replace(/[^a-z0-9\u0980-\u09ff]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'artifact') + '.' + ext; }
+  function fileName(title, ext) {
+    var raw = String(title || 'artifact').trim(), extension = String(ext || 'txt').replace(/^\./, '').toLowerCase() || 'txt';
+    if (extension === 'dockerfile' && /^dockerfile$/i.test(raw)) return 'Dockerfile';
+    if (extension === 'makefile' && /^makefile$/i.test(raw)) return 'Makefile';
+    if (extension === 'env' && /^\.env(?:\.[a-z0-9_-]+)?$/i.test(raw)) return raw.toLowerCase();
+    if (raw.toLowerCase().slice(-(extension.length + 1)) === '.' + extension) raw = raw.slice(0, -(extension.length + 1));
+    return (raw.toLowerCase().replace(/[^a-z0-9\u0980-\u09ff]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'artifact') + '.' + extension;
+  }
 
   function versionData(rec, index) { return rec.versions[Math.max(0, Math.min(rec.versions.length - 1, index))]; }
 

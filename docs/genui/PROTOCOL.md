@@ -13,7 +13,7 @@ and not tags.
 | Facts, short answers | prose (markdown tables are fine) | — |
 | An explanation, a process, a comparison, a trend, numbers to explore | **inline visual**: drawn into the answer like a figure, with no card or border; streams while written; sized to its content | ` ```sds-visual ` |
 | A small fixed widget (calculator, stats, table) | **inline widget**: validated JSON turned into DOM nodes | ` ```sds-ui ` |
-| A deliverable to keep, edit, download (app, game, site, document, long code, diagram) | **artifact**: a compact card in the message that opens the Claude-style viewer | ` ```sds-genui ` |
+| A deliverable to keep, edit or download — including any explicitly requested file (app, game, site, document, source/config/data file, long code, diagram) | **artifact**: a compact card in the message that opens the Claude-style viewer | ` ```sds-genui ` |
 | An MCP tool that declares a UI | **MCP App**: shown inline under the tool call | (automatic) |
 
 The old `<SDS:VISUALIZER>` tag is deprecated in the prompt. If the model still
@@ -80,6 +80,10 @@ document`, `jsx|tsx → react`, `diagram → mermaid`.
 | svg | one `<svg>` | live |
 | ui, tool-result, mcp-app | as before | rendered **inline**, never as a card |
 
+### File-first generation
+
+If the user asks to create, write, save, export, or download a file, return the deliverable as a `sds-genui` artifact; do not substitute prose or an inline-only visual. Use the requested filename (including extension) as its title when possible. Use `kind: code` with `language:` for downloadable text/source/data/config formats such as CSV, TSV, JSON, YAML, TOML, XML, SQL, HTML, Python, TypeScript, Kotlin, Jupyter JSON and config files; use `document` for Markdown; reserve `html-app` for a runnable/interactive app. The viewer exports actual source formats; it does not synthesize true binary PDF, DOCX, XLSX or PPTX files. For those, provide a clearly labelled print-ready/source artifact and state its actual download format.
+
 **Card** (claude.ai): icon tile, title, "type · version", and a download
 button. While the block streams, the card shows a spinner and "Generating…".
 Tapping the card during streaming opens the viewer on the Code tab, which
@@ -138,7 +142,7 @@ of failing. Security checks in `validate()` stay strict.
   for up to 1.4 s until the first real size arrives.
 * A block is final when more markdown follows it, or after 1.6 s without
   changes. A visibly complete body (`</svg>`, `</html>`) also counts.
-* If a body cannot be rendered, an error card replaces it (the code is behind
+ * If a typed artifact is malformed or its renderer throws, the engine first tries a non-executable, downloadable source-only code artifact within protocol size limits. Only when that fallback cannot be safely stored does an error card appear with **Show code** and **Ask to fix**. The fallback never executes generated code. Each code block keeps its own state, so DOM mutations never duplicate cards.
   **Show code**). Nothing is executed or dispatched. Each code block keeps its
   own state, so DOM mutations never duplicate cards.
 * Kill switch: disabling Generative UI removes every surface and skeleton and
