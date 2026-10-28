@@ -93,26 +93,26 @@ test('raw MCP calls count as run steps and automatic results ignore DOM role mis
   assert.equal(g[0].final, 3);
 });
 
-test('raw MCP call text hides only its own block, not surrounding prose', () => {
+test('raw call spans support name= and preserve prose around a call', () => {
   const { R: run } = load();
-  const raw = '<SDS:AUTO:MCP url="sandbox" tool="write_file">{"path":"a.py"}</SDS:AUTO:MCP>';
-  const code = { textContent: raw, querySelectorAll: () => [] };
-  const prose = { textContent: 'I will write the file now.', querySelectorAll: () => [] };
-  const parent = {
-    textContent: prose.textContent + raw,
-    querySelectorAll: (selector) => selector === 'p, pre, li, blockquote' ? [code] : [],
-  };
-  const host = {
-    querySelectorAll: (selector) => {
-      if (selector === 'p, pre, li, blockquote') return [parent, code, prose];
-      return [];
-    },
-  };
-  const hidden = new Set();
-  run._hideRawCallBlocks(host, hidden);
-  assert.equal(hidden.has(code), true);
-  assert.equal(hidden.has(prose), false);
-  assert.equal(hidden.has(parent), false);
+  const raw = 'I will execute it: <SDS:AUTO:MCP url="sandbox" ' +
+    'name="run">{"command":"echo one"}</SDS:AUTO:MCP> done.';
+  const spans = plain(run._findRawCallSpans(raw));
+  assert.equal(spans.length, 1);
+  assert.equal(raw.slice(spans[0].start, spans[0].end),
+    '<SDS:AUTO:MCP url="sandbox" name="run">{"command":"echo one"}</SDS:AUTO:MCP>');
+  assert.equal(run._rawCallCount('<SDS:AUTO:MCP name="run"/>'), 1);
+  assert.equal(raw.slice(0, spans[0].start), 'I will execute it: ');
+  assert.equal(raw.slice(spans[0].end), ' done.');
+});
+
+test('assistant examples and filenames are not automatic results without the protocol envelope', () => {
+  const { R: run } = load();
+  assert.equal(run._isAutoUserText('Final: saved as mcp_results_run.txt', 'assistant'), false);
+  assert.equal(run._isAutoUserText('Example marker [SDS:AUTO_MCP_RESULT]', 'assistant'), false);
+  assert.equal(run._isAutoUserText('[SDS:AUTO_MCP_RESULT]{"content":"ok"}[/SDS:AUTO_MCP_RESULT]', 'assistant'), false);
+  assert.equal(run._isAutoUserText('<SuperDeepSeek>\\n[SDS:AUTO] MCP Result for run @ sandbox\\n' +
+    '[SDS:AUTO_MCP_RESULT]\\n{"content":"ok"}\\n[/SDS:AUTO_MCP_RESULT]\\n</SuperDeepSeek>', 'assistant'), true);
 });
 
 test('filename fallback applies only to user messages, not assistant prose', () => {
