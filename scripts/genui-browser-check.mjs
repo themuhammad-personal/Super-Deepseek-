@@ -186,12 +186,20 @@ try {
       return !!stage && !stage.classList.contains('sd-vis-loading') && !!frame &&
         frame.getBoundingClientRect().height > 30 && getComputedStyle(frame).opacity !== '0';
     }, null, { timeout: 5000 });
-    const box = await frame.boundingBox();
-    const svgBox = await frame.contentFrame().locator('#sds-root svg[viewBox]').first().boundingBox();
+    const svg = frame.contentFrame().locator('#sds-root svg[viewBox]').first();
+    let box = null, svgBox = null, contained = false;
+    // SVG auto-height can settle after the frame's first boot/ResizeObserver tick.
+    // Wait for the host resize to catch up instead of screenshotting a transient crop.
+    for (let attempt = 0; attempt < 40; attempt++) {
+      box = await frame.boundingBox();
+      svgBox = await svg.boundingBox();
+      contained = !!box && !!svgBox && svgBox.y + svgBox.height <= box.y + box.height + 2;
+      if (contained) break;
+      await page.waitForTimeout(75);
+    }
     assert.ok(box && box.height > 30, 'inline SVG frame must have visible layout height');
     assert.ok(svgBox && svgBox.width > 30 && svgBox.height > 30, 'SVG must have a visible content box');
-    assert.ok(svgBox.y + svgBox.height <= box.y + box.height + 2,
-      'inline frame must contain the full SVG; frame=' + JSON.stringify(box) + ' svg=' + JSON.stringify(svgBox));
+    assert.ok(contained, 'inline frame must eventually contain the full SVG; frame=' + JSON.stringify(box) + ' svg=' + JSON.stringify(svgBox));
     assert.deepEqual(errors, []);
     await shot(page, '02b-json-inline-presentation.png');
     // The same live code block may be revised by the model: inline → card must
