@@ -93,6 +93,28 @@ test('raw MCP calls count as run steps and automatic results ignore DOM role mis
   assert.equal(g[0].final, 3);
 });
 
+test('raw MCP call text hides only its own block, not surrounding prose', () => {
+  const { R: run } = load();
+  const raw = '<SDS:AUTO:MCP url="sandbox" tool="write_file">{"path":"a.py"}</SDS:AUTO:MCP>';
+  const code = { textContent: raw, querySelectorAll: () => [] };
+  const prose = { textContent: 'I will write the file now.', querySelectorAll: () => [] };
+  const parent = {
+    textContent: prose.textContent + raw,
+    querySelectorAll: (selector) => selector === 'p, pre, li, blockquote' ? [code] : [],
+  };
+  const host = {
+    querySelectorAll: (selector) => {
+      if (selector === 'p, pre, li, blockquote') return [parent, code, prose];
+      return [];
+    },
+  };
+  const hidden = new Set();
+  run._hideRawCallBlocks(host, hidden);
+  assert.equal(hidden.has(code), true);
+  assert.equal(hidden.has(prose), false);
+  assert.equal(hidden.has(parent), false);
+});
+
 test('plain chats are left alone', () => {
   const { R: run } = load();
   assert.deepEqual(plain(run._groupRuns([U, A(0), U, A(0)])), []);
