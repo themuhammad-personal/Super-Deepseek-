@@ -44,7 +44,7 @@ test('publishable APK gate verifies manifest, versionCode, checksum, signer, and
     '75ebff1ca33e27e8f14d98122dc5e6db811a1c77f37133b7bbbd24cd75ba3803',
     'apksigner verify --verbose --print-certs "$APK_PATH"',
   ]) assert.ok(gate.includes(required), `missing release invariant: ${required}`);
-  assert.match(match[0], /if: startsWith\(github\.ref, 'refs\/tags\/v'\) \|\| github\.ref == 'refs\/heads\/main'/);
+  assert.match(match[0], /if: \\(github\\.event_name == 'push'[\\s\\S]*inputs\\.publish == true && github\\.ref == 'refs\\/heads\\/main'\\)/);
 });
 
 test('published release still requires permanent signing material, never a test key', () => {
@@ -58,13 +58,12 @@ test('trusted publishing refs protect the permanent signer and treat tags as dat
   assert.equal(workflow.split(trustedPublishCondition).length - 1, 3,
     'permanent signing, APK gate, and release publishing must share trusted-event/ref rules');
 
-  const releaseConfig = workflow.match(/- id: rel_cfg([\\s\\S]*?)(?=\\n      - uses: softprops\\/action-gh-release@v3)/)?.[1];
+  const releaseConfig = workflow.match(/- id: rel_cfg([\s\S]*?)(?=\n      - uses: softprops\/action-gh-release@v3)/)?.[1];
   assert.ok(releaseConfig, 'release configuration step must exist');
-  assert.match(releaseConfig, /if \\[\\[ "\\$GITHUB_REF" == refs\\/tags\\/v\\\\\\* \\]\\]/);
-  assert.doesNotMatch(releaseConfig, /\\$\\{\\{\\s*github\\.(?:ref|ref_name)\\s*\\}\\}/,
+  assert.match(releaseConfig, /if \[\[ "\$GITHUB_REF" == refs\/tags\/v\* \]\]/);
+  assert.doesNotMatch(releaseConfig, /github\.(?:ref|ref_name)/,
     'untrusted ref values must not be interpolated into shell source');
 });
-
 test('README and build notes do not freeze changing Chromium acceptance totals', () => {
   for (const [name, doc] of [['README.md', readme], ['BUILD-NOTES.md', buildNotes]]) {
     assert.doesNotMatch(doc, /\b\d+\s+(?:Generative UI |GenUI )?acceptance checks\b/i, name);
