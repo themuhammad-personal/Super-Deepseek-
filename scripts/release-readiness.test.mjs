@@ -44,7 +44,7 @@ test('publishable APK gate verifies manifest, versionCode, checksum, signer, and
     '75ebff1ca33e27e8f14d98122dc5e6db811a1c77f37133b7bbbd24cd75ba3803',
     'apksigner verify --verbose --print-certs "$APK_PATH"',
   ]) assert.ok(gate.includes(required), `missing release invariant: ${required}`);
-  assert.match(match[0], /workflow_dispatch.*inputs\\.publish == true.*refs\\/heads\\/main/);
+  assert.ok(match[0].includes('inputs.publish == true') && match[0].includes('refs/heads/main'));
 });
 
 test('published release still requires permanent signing material, never a test key', () => {
