@@ -171,6 +171,22 @@ test('raw call spans support name= and preserve prose around a call', () => {
   assert.equal(second.childNodes.filter(n => n.tagName === 'SPAN').length, 0, 'restore unwraps second paragraph spans');
 });
 
+test('MCP span parser rejects quoted fake attributes and separates incomplete calls', () => {
+  const { R: run } = load();
+  const quoted = '<SDS:AUTO:MCP url="sandbox" note="tool=run"/>';
+  assert.equal(run._rawCallCount(quoted), 0, 'quoted text is not an attribute');
+  const first = '<SDS:AUTO:MCP url="sandbox" tool="run">partial output';
+  assert.equal(run._rawCallCount(first), 1);
+  assert.deepEqual(plain(run._findRawCallSpans(first)), [{ start: 0, end: first.length }]);
+
+  const second = '<SDS:AUTO:MCP url="sandbox" name="job">done</SDS:AUTO:MCP>';
+  const both = first + second;
+  const spans = plain(run._findRawCallSpans(both));
+  assert.equal(spans.length, 2);
+  assert.equal(both.slice(spans[0].start, spans[0].end), first);
+  assert.equal(both.slice(spans[1].start, spans[1].end), second);
+});
+
 test('assistant examples and filenames are not automatic results without the protocol envelope', () => {
   const { R: run } = load();
   assert.equal(run._isAutoUserText('Final: saved as mcp_results_run.txt', 'assistant'), false);
