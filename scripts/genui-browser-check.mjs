@@ -195,7 +195,7 @@ try {
     const { ctx, page, errors } = await fresh();
     await page.evaluate(() => {
       const md = fx.message();
-      fx.block(md, 'sds-genui', 'id: broken-widget\\nkind: ui\\ntitle: Broken Widget\\n---\\n{not valid JSON');
+      fx.block(md, 'sds-genui', 'id: broken-widget\nkind: ui\ntitle: Broken Widget\n---\n{not valid JSON');
       fx.para(md, 'done');
     });
     const card = page.locator('.sd-art[data-kind="code"]');

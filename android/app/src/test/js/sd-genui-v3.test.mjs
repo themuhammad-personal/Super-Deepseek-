@@ -140,7 +140,7 @@ test('viewer: describe/sourceOf/frameKind cover every artifact kind', () => {
 test('protocol: common data/config labels normalize to non-executable code artifacts', () => {
   const { window } = load(['sd-genui-protocol.js']), P = window.__sdGenUIProtocol;
   for (const language of ['csv','tsv','jsonl','json5','ini','env','dotenv','properties','conf','config','graphql','gql','proto','protobuf','dockerfile','makefile','ipynb','txt','log','diff','ps1','powershell']) {
-    const r = P.parseBlock('id: output-file\\nkind: ' + language + '\\ntitle: output.' + language + '\\n---\\nvalue = 1');
+    const r = P.parseBlock('id: output-file\nkind: ' + language + '\ntitle: output.' + language + '\n---\nvalue = 1');
     assert.equal(r.ok, true, language + ': ' + r.error);
     assert.equal(r.block.kind, 'code', language);
     assert.equal(r.block.payload.language, language);
