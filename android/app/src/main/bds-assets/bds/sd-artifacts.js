@@ -30,6 +30,24 @@
     var m = new RegExp('^\\s*' + key + '\\s*:\\s*(.+)$', 'm').exec(text) || new RegExp('"' + key + '"\\s*:\\s*"([^"]{1,160})"').exec(text);
     return m ? m[1].trim().slice(0, 120) : '';
   }
+  function inlineRequested(source) {
+    if (/^\s*\{/.test(source)) {
+      try { return JSON.parse(source).presentation === 'inline'; } catch (_) { return false; }
+    }
+    // Match the protocol header boundary, not arbitrary body text. The first
+    // presentation header wins, just as it does in sd-genui-protocol.js.
+    var lines = String(source || '').replace(/^\uFEFF/, '').split(/\r?\n/);
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      if (/^\s*---\s*$/.test(line) || !line.trim() || /^\s*</.test(line)) break;
+      var m = /^\s*([A-Za-z][A-Za-z_-]{0,31})\s*:\s?(.*)$/.exec(line);
+      if (!m) break;
+      if (m[1].toLowerCase() === 'presentation') {
+        return m[2].trim().replace(/^[\"'`]|[\"'`]$/g, '').toLowerCase() === 'inline';
+      }
+    }
+    return false;
+  }
   /** -> {ok, block, raw, waiting, skip, error} */
   function normalize(lang, source, final) {
     var text = String(source || '').replace(/\s+$/, '');
@@ -41,7 +59,7 @@
       }
       if (/^\s*\{/.test(source) && !final) { try { JSON.parse(source); } catch (_) { return { ok: false, error: 'Waiting for the block to finish', waiting: true }; } }
       var r0 = P.parseBlock ? P.parseBlock(source) : P.validate(source);
-      if (r0.ok) r0.inline = /^\s*presentation\s*:\s*inline\s*$/m.test(source.split(/\n---\s*\n/)[0] || '');
+      if (r0.ok) r0.inline = inlineRequested(source);
       return r0;
     }
     var kind = lang === 'sds-svg' ? 'svg' : 'html-app';
