@@ -157,6 +157,33 @@ test('failed DataTransfer setup keeps and replays the user’s original file sel
   assert.match(logs.join(' '), /original selection was kept/);
 });
 
+test('a newer selection invalidates an older asynchronous conversion', async () => {
+  const { listeners } = load(undefined, { console: { info() {}, warn() {} } });
+  let finishRead, readStarted = false;
+  const older = file(Buffer.from('placeholder'), 'older.unsupported');
+  older.arrayBuffer = () => { readStarted = true; return new Promise((resolve) => { finishRead = resolve; }); };
+  const newer = file(Buffer.from('%PDF-1.4'), 'newer.pdf', 'application/pdf');
+  const dispatched = [];
+  const input = {
+    tagName: 'INPUT', type: 'file', multiple: true, accept: '.pdf', files: [older],
+    hasAttribute: () => false, closest: () => null,
+    dispatchEvent: (e) => { dispatched.push(e); return true; },
+  };
+  let firstStopped = false;
+  listeners[0][1]({ target: input, stopImmediatePropagation() { firstStopped = true; }, stopPropagation() {} });
+  await Promise.resolve();
+  assert.equal(readStarted, true, 'the first file read is pending');
+  assert.equal(firstStopped, true);
+  input.files = [newer];
+  let secondStopped = false;
+  listeners[0][1]({ target: input, stopImmediatePropagation() { secondStopped = true; }, stopPropagation() {} });
+  assert.equal(secondStopped, false, 'the accepted newer selection continues to the page');
+  finishRead(new Uint8Array(Buffer.from('older contents')).buffer);
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.deepEqual(input.files, [newer], 'the stale conversion cannot overwrite a newer selection');
+  assert.equal(dispatched.length, 0, 'the stale conversion is not replayed');
+});
+
 test('a capture-phase change listener is installed on the document', () => {
   const { listeners } = load();
   assert.ok(listeners.some(([type, , capture]) => type === 'change' && capture === true));

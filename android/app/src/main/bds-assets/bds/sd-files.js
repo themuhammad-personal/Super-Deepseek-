@@ -441,10 +441,13 @@
 
   // ── the change-event hand-off ──────────────────────────────────────────────
   var ours = typeof WeakSet === 'function' ? new WeakSet() : null;
+  var pendingChanges = typeof WeakMap === 'function' ? new WeakMap() : null, changeSequence = 0;
   function onChange(e) {
     var input = e.target;
     if (!input || input.tagName !== 'INPUT' || input.type !== 'file') return;
     if (ours && ours.has(e)) return;
+    var token = ++changeSequence;
+    if (pendingChanges) pendingChanges.set(input, token);
     if (input.closest && input.closest('#bds-root, .bds-attach-wrapper, [data-sd-owned]')) return;
     var list = input.files ? Array.prototype.slice.call(input.files) : [];
     if (!list.length || !list.some(function (f) { return needsWork(f, input); })) return;
@@ -456,11 +459,14 @@
       if (ours) ours.add(ev);
       input.dispatchEvent(ev);
     }
+    function isCurrent() { return !pendingChanges || pendingChanges.get(input) === token; }
     function keepOriginals() {
+      if (!isCurrent()) return;
       toast(t('Could not prepare files; the original selection was kept.', 'ফাইল প্রস্তুত করা যায়নি; মূল নির্বাচন রাখা হয়েছে।'));
       try { replayChange(); } catch (err) { console.warn('[SD files] could not replay original selection', err); }
     }
     convertAll(list, input).then(function (r) {
+      if (!isCurrent()) return;
       if (r.notes.length) toast(r.notes.slice(0, 3).join(' · ') + (r.notes.length > 3 ? ' …' : ''));
       if (!r.files.length) return;
       try {
@@ -470,6 +476,7 @@
       } catch (err) { keepOriginals(); return; }
       try { replayChange(); } catch (err) { console.warn('[SD files] could not dispatch prepared files', err); }
     }, function (err) {
+      if (!isCurrent()) return;
       console.warn('[SD files] file preparation failed', err);
       keepOriginals();
     });
