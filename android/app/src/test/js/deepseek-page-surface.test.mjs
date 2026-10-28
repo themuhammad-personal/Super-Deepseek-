@@ -57,9 +57,16 @@ function runProbe({
   };
   const window = {
     getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    performance: { timeOrigin: 12345 },
   };
   return vm.runInNewContext(PROBE, { window, document, location: { pathname: pathName } });
 }
+
+test('probe contract carries a stable non-empty document token', () => {
+  const probe = runProbe({ pathName: '/sign_in' });
+  assert.equal(probe.surface, 'auth');
+  assert.equal(probe.documentToken, '12345');
+});
 
 test('a DeepSeek sign-in route is left untouched', () => {
   assert.equal(runProbe({ pathName: '/sign_in' }).surface, 'auth');
