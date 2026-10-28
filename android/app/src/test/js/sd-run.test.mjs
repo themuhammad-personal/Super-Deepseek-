@@ -187,6 +187,16 @@ test('MCP span parser rejects quoted fake attributes and separates incomplete ca
   assert.equal(both.slice(spans[1].start, spans[1].end), second);
 });
 
+test('encoded closing-tag text inside a call body does not terminate the span', () => {
+  const { R: run } = load();
+  // This is what textContent exposes after the browser decodes &lt; and &gt;.
+  const raw = '<SDS:AUTO:MCP url="sandbox" tool="write_file">' +
+    '{"content":"literal </SDS:AUTO:MCP> text"}</SDS:AUTO:MCP>';
+  const spans = plain(run._findRawCallSpans(raw));
+  assert.equal(spans.length, 1);
+  assert.equal(raw.slice(spans[0].start, spans[0].end), raw);
+});
+
 test('assistant examples and filenames are not automatic results without the protocol envelope', () => {
   const { R: run } = load();
   assert.equal(run._isAutoUserText('Final: saved as mcp_results_run.txt', 'assistant'), false);
