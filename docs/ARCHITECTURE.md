@@ -189,11 +189,35 @@ frame, so sandboxed frames cannot use it), `WebViewBridge.openGeneratedApp` → 
 `GeneratedApps` (bounded cache files).
 Full protocol and threat model: [genui/PROTOCOL.md](genui/PROTOCOL.md).
 
+## Engine self-check (2.72.0)
+
+The engine rides on chat.deepseek.com's DOM: about thirty hashed class names and
+a handful of stable ones. When DeepSeek deploys a redesign, a feature disappears
+without an error, and the app has no telemetry by design, so the failure would
+never be noticed. `sd-health.js` (loaded last) is the detector:
+
+- it probes the page contract — composer, chat history, message list, markdown,
+  code blocks, stop button, copy button, reasoning panel — where every check
+  lists **alternative selectors**, so a partial change stays quiet;
+- it probes the globals each native module installs (`__sdAgent`, `__sdRun`,
+  `__sdGenui`, …), so a module that failed to run on a changed page is named;
+- a **core** check failing (composer or history) or **3+** feature checks
+  failing shows a dismissible strip; one or two missing features stay silent;
+- the report (selectors, module names, user agent, URL without its query string)
+  is copied with one tap, and the last 20 runs live in `localStorage.sd_health_v1`;
+- *Advanced settings → Linux & Agent → Diagnostics* shows the same state and
+  opens the report.
+
+Kill switch: `localStorage.sd_health_off = '1'` or `__sdHealth.setEnabled(false)`.
+The check never modifies the page beyond its own (tagged `data-sd-owned`) strip.
+
 ## Tests
 
 - Kotlin unit tests: `android/app/src/test/java/…` (`./gradlew testDebugUnitTest`), run in CI.
-- Engine tests: `npm test` (node:test over `android/app/src/test/js/` + compliance-harness self-test), run in CI.
-- Generative UI acceptance: `npm run genui:acceptance` (15 checks, Playwright Chromium against
+- Engine tests: `npm test` (node:test over `android/app/src/test/js/` + compliance-harness self-test
+  + the sandbox-deps ELF page-size self-test), run in CI. `repo-consistency.test.mjs` guards the
+  release identity (version in two files, versionCode ladder, engine module list vs bundle).
+- Generative UI acceptance: `npm run genui:acceptance` (20 checks, Playwright Chromium against
   `design-preview/genui.html` / `genui-csp.html` with a mocked bridge), run in CI; screenshots are
   uploaded as the `genui-acceptance` artifact.
 - CI (`.github/workflows/build-and-release-apk.yml`) builds and verifies a signed release
