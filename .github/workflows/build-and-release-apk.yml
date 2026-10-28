@@ -475,7 +475,6 @@ jobs:
             *.apk
             *.sha256
             super-deepseek-source-v*.zip
-            super-deepseek-source-v*.zip.sha256
           prerelease: false
           make_latest: true
         env:
