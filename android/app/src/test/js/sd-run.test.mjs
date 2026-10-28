@@ -186,7 +186,8 @@ test('filename fallback applies only to user messages, not assistant prose', () 
     { role: 'assistant', auto: false, calls: 0 });
   assert.deepEqual(plain(run._classifyMessage('user', 'mcp_results_run.txt', 0, false)),
     { role: 'user', auto: true, calls: 0 });
-  const result = '[SDS:AUTO_MCP_RESULT]\n{"content":"ok"}\n[/SDS:AUTO_MCP_RESULT]';
+  const result = '<SuperDeepSeek>\n[SDS:AUTO] MCP Result for run @ sandbox\n' +
+    '[SDS:AUTO_MCP_RESULT]\n{"content":"ok"}\n[/SDS:AUTO_MCP_RESULT]\n</SuperDeepSeek>';
   assert.deepEqual(plain(run._classifyMessage('assistant', result, 0, false)),
     { role: 'user', auto: true, calls: 0 });
 });
