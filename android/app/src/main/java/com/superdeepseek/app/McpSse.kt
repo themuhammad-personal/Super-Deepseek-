@@ -14,13 +14,13 @@ import java.io.BufferedReader
 internal object McpSse {
     private fun idEq(a: Any?, b: Any?): Boolean = a != null && b != null && a.toString() == b.toString()
 
-    /** Returns the response (has result or error) for [wantId]; when the stream
-     *  ends without one, the last response seen (servers that echo a different
-     *  id type), or null. Throws when more than [maxChars] were read. */
+    /** Returns only a JSON-RPC response correlated to [wantId].
+     * A different request's result is never used as a fallback; if no matching
+     * response arrives before EOF, returns null. Throws when more than [maxChars] were read.
+     */
     fun readResponse(reader: BufferedReader, wantId: Any?, maxChars: Long): JSONObject? {
         val data = StringBuilder()
         var total = 0L
-        var fallback: JSONObject? = null
         while (true) {
             val line = reader.readLine()
             if (line == null || line.isEmpty()) {
@@ -29,10 +29,9 @@ internal object McpSse {
                     val msg = if (text.trim() == "[DONE]") null else runCatching { JSONObject(text) }.getOrNull()
                     if (msg != null && (msg.has("result") || msg.has("error"))) {
                         if (wantId == null || idEq(msg.opt("id"), wantId)) return msg
-                        fallback = msg
                     }
                 }
-                if (line == null) return fallback
+                if (line == null) return null
                 continue
             }
             total += line.length + 1
