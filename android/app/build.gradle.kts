@@ -44,21 +44,34 @@ android {
         }
         signingConfigs {
             create("release") {
-                val permanentKeystore = file("superdeepseek-release.jks").takeIf { it.exists() }
+                val releaseKeystore = file("superdeepseek-release.jks").takeIf { it.exists() }
                     ?: rootProject.file("ci-release.jks").takeIf { it.exists() }
                     ?: rootProject.file("android/app/superdeepseek-release.jks").takeIf { it.exists() }
 
-                if (permanentKeystore != null && permanentKeystore.exists()) {
-                    storeFile = permanentKeystore
-                    val envStorePass = System.getenv("BDS_KEYSTORE_PASSWORD")
-                    val envAlias = System.getenv("BDS_KEY_ALIAS")
-                    val envKeyPass = System.getenv("BDS_KEY_PASSWORD")
+                val requireCiSigning = System.getenv("BDS_REQUIRE_RELEASE_SIGNING") == "true"
+                val envStorePass = System.getenv("BDS_KEYSTORE_PASSWORD")
+                val envAlias = System.getenv("BDS_KEY_ALIAS")
+                val envKeyPass = System.getenv("BDS_KEY_PASSWORD")
 
+                if (requireCiSigning && (releaseKeystore == null || !releaseKeystore.exists())) {
+                    throw org.gradle.api.GradleException(
+                        "CI requires an explicitly prepared release keystore; refusing to sign with a debug or fallback key."
+                    )
+                }
+                if (requireCiSigning && (envStorePass.isNullOrEmpty() || envAlias.isNullOrEmpty() || envKeyPass.isNullOrEmpty())) {
+                    throw org.gradle.api.GradleException(
+                        "CI release signing credentials are incomplete; refusing to build a publishable APK."
+                    )
+                }
+
+                if (releaseKeystore != null && releaseKeystore.exists()) {
+                    storeFile = releaseKeystore
                     storePassword = if (!envStorePass.isNullOrEmpty()) envStorePass else "superdeepseek"
                     keyAlias = if (!envAlias.isNullOrEmpty()) envAlias else "superdeepseek"
                     keyPassword = if (!envKeyPass.isNullOrEmpty()) envKeyPass else "superdeepseek"
                 } else {
-                    // Fallback to debug keystore when release keystore is not supplied
+                    // Local release builds may use the debug key for convenience. CI sets
+                    // BDS_REQUIRE_RELEASE_SIGNING=true and must never take this fallback.
                     val debugConfig = getByName("debug")
                     storeFile = debugConfig.storeFile
                     storePassword = debugConfig.storePassword

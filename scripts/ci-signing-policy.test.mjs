@@ -1,0 +1,37 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import test from 'node:test';
+
+const workflow = await readFile(new URL('../.github/workflows/build-and-release-apk.yml', import.meta.url), 'utf8');
+const gradle = await readFile(new URL('../android/app/build.gradle.kts', import.meta.url), 'utf8');
+
+test('the Arena working branch runs CI without enabling publication', () => {
+  assert.ok(workflow.includes('      - "arena/**"'));
+  assert.ok(workflow.includes("github.event_name == 'push' && github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/v')"));
+  assert.ok(workflow.includes("if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main'"));
+});
+
+test('publishable workflows require all permanent signing secrets', () => {
+  assert.match(workflow, /Prepare permanent release signing key[\s\S]*?BDS_KEYSTORE: \$\{\{ secrets\.BDS_KEYSTORE \}\}/);
+  for (const secret of ['BDS_KEYSTORE', 'BDS_KEYSTORE_PASSWORD', 'BDS_KEY_ALIAS', 'BDS_KEY_PASSWORD']) {
+    assert.ok(workflow.includes(`secrets.${secret}`));
+  }
+  assert.match(workflow, /for name in BDS_KEYSTORE BDS_KEYSTORE_PASSWORD BDS_KEY_ALIAS BDS_KEY_PASSWORD/);
+  assert.match(workflow, /base64 --decode > ci-release\.jks/);
+  assert.doesNotMatch(workflow, /Generating fallback release keystore/);
+  assert.doesNotMatch(workflow, /secrets\.BDS_KEYSTORE_PASSWORD \|\| 'superdeepseek'/);
+});
+
+test('non-publishing checks use an ephemeral randomized key only', () => {
+  assert.match(workflow, /Prepare temporary signing key for non-publishing checks/);
+  assert.match(workflow, /password=\$\(openssl rand -hex 24\)/);
+  assert.match(workflow, /BDS_KEY_ALIAS=ci-test-only/);
+  assert.match(workflow, /workflow_dispatch.*inputs\.publish != true/);
+});
+
+test('CI builds fail closed if their explicitly prepared key or credentials are missing', () => {
+  assert.match(workflow, /BDS_REQUIRE_RELEASE_SIGNING: 'true'/);
+  assert.match(gradle, /val requireCiSigning = System\.getenv\("BDS_REQUIRE_RELEASE_SIGNING"\) == "true"/);
+  assert.match(gradle, /if \(requireCiSigning && \(releaseKeystore == null \|\| !releaseKeystore\.exists\(\)\)\)[\s\S]*?throw org\.gradle\.api\.GradleException/);
+  assert.match(gradle, /if \(requireCiSigning && \(envStorePass\.isNullOrEmpty\(\) \|\| envAlias\.isNullOrEmpty\(\) \|\| envKeyPass\.isNullOrEmpty\(\)\)\)[\s\S]*?throw org\.gradle\.api\.GradleException/);
+});
