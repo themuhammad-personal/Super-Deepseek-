@@ -6,17 +6,54 @@ import org.junit.Test
 
 class DeepSeekPageSurfaceTest {
     @Test
-    fun `parses WebView JSON string results`() {
-        assertEquals(DeepSeekPageSurface.CHAT, parseDeepSeekPageSurface("\"chat\""))
-        assertEquals(DeepSeekPageSurface.AUTH, parseDeepSeekPageSurface("\"auth\""))
-        assertEquals(DeepSeekPageSurface.LOADING, parseDeepSeekPageSurface("\"loading\""))
+    fun `parses WebView surface objects and retains document identity`() {
+        assertEquals(
+            DeepSeekPageSurfaceProbe(DeepSeekPageSurface.CHAT, "123.45"),
+            parseDeepSeekPageSurfaceProbe("""{"surface":"chat","documentToken":"123.45"}"""),
+        )
+        assertEquals(
+            DeepSeekPageSurfaceProbe(DeepSeekPageSurface.AUTH, "123.45"),
+            parseDeepSeekPageSurfaceProbe("""{"surface":"auth","documentToken":"123.45"}"""),
+        )
+        assertEquals(
+            DeepSeekPageSurfaceProbe(DeepSeekPageSurface.LOADING, "123.45"),
+            parseDeepSeekPageSurfaceProbe("""{"surface":"loading","documentToken":"123.45"}"""),
+        )
     }
 
     @Test
     fun `unknown or missing probe results fail closed`() {
-        listOf(null, "", "null", "\"unexpected\"", "\"CHAT\"").forEach {
-            assertEquals(DeepSeekPageSurface.LOADING, parseDeepSeekPageSurface(it))
+        listOf(null, "", "null", "\"unexpected\"", """{"surface":"chat"}""", """{"surface":"CHAT","documentToken":"123"}""").forEach {
+            assertEquals(DeepSeekPageSurface.LOADING, parseDeepSeekPageSurfaceProbe(it).surface)
         }
+        assertEquals("", parseDeepSeekPageSurfaceProbe("""{"surface":"chat"}""").documentToken)
+    }
+
+    @Test
+    fun `claim script checks document and live surface before setting injected marker`() {
+        val script = buildDeepSeekEngineClaimScript("123.45")
+        val identityCheck = script.indexOf("probe.documentToken!==\"123.45\"")
+        val surfaceCheck = script.indexOf("probe.surface!=='chat'")
+        val existingCheck = script.indexOf("if(window.__sdEngineInjected)return 'already'")
+        val markerWrite = script.indexOf("window.__sdEngineInjected=true")
+
+        assertTrue(identityCheck >= 0)
+        assertTrue(identityCheck < surfaceCheck)
+        assertTrue(surfaceCheck < existingCheck)
+        assertTrue(existingCheck < markerWrite)
+        assertTrue(script.contains("textarea#chat-input"))
+        assertTrue(script.contains("captcha"))
+    }
+
+    @Test
+    fun `claim result parser fails closed for unexpected values`() {
+        assertEquals(DeepSeekEngineClaimResult.CLAIMED, parseDeepSeekEngineClaimResult("\"claimed\""))
+        assertEquals(DeepSeekEngineClaimResult.ALREADY_PRESENT, parseDeepSeekEngineClaimResult("\"already\""))
+        assertEquals(DeepSeekEngineClaimResult.AUTH, parseDeepSeekEngineClaimResult("\"auth\""))
+        assertEquals(DeepSeekEngineClaimResult.LOADING, parseDeepSeekEngineClaimResult("\"loading\""))
+        assertEquals(DeepSeekEngineClaimResult.STALE, parseDeepSeekEngineClaimResult("\"stale\""))
+        assertEquals(DeepSeekEngineClaimResult.UNKNOWN, parseDeepSeekEngineClaimResult(null))
+        assertEquals(DeepSeekEngineClaimResult.UNKNOWN, parseDeepSeekEngineClaimResult("\"unexpected\""))
     }
 
     @Test

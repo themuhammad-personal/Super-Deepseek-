@@ -57,38 +57,45 @@ function runProbe({
   };
   const window = {
     getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    performance: { timeOrigin: 12345 },
   };
   return vm.runInNewContext(PROBE, { window, document, location: { pathname: pathName } });
 }
 
+test('probe contract carries a stable non-empty document token', () => {
+  const probe = runProbe({ pathName: '/sign_in' });
+  assert.equal(probe.surface, 'auth');
+  assert.equal(probe.documentToken, '12345');
+});
+
 test('a DeepSeek sign-in route is left untouched', () => {
-  assert.equal(runProbe({ pathName: '/sign_in' }), 'auth');
+  assert.equal(runProbe({ pathName: '/sign_in' }).surface, 'auth');
 });
 
 test('an email/password/OTP field is treated as authentication', () => {
-  assert.equal(runProbe({ fields: [element({ type: 'email' })] }), 'auth');
-  assert.equal(runProbe({ fields: [element({ type: 'password' })] }), 'auth');
-  assert.equal(runProbe({ fields: [element({ autocomplete: 'one-time-code' })] }), 'auth');
+  assert.equal(runProbe({ fields: [element({ type: 'email' })] }).surface, 'auth');
+  assert.equal(runProbe({ fields: [element({ type: 'password' })] }).surface, 'auth');
+  assert.equal(runProbe({ fields: [element({ autocomplete: 'one-time-code' })] }).surface, 'auth');
 });
 
 test('the first login screen is detected even before an input appears', () => {
   assert.equal(runProbe({
     bodyText: 'Sign in or Continue with Google',
     controls: [element()],
-  }), 'auth');
+  }).surface, 'auth');
 });
 
 test('a visible CAPTCHA takes precedence over a chat-shaped page', () => {
   assert.equal(runProbe({
     challengeNodes: [element({ src: 'https://newassets.hcaptcha.com/captcha/v1/check' })],
     composerNodes: [element()],
-  }), 'auth');
+  }).surface, 'auth');
 });
 
 test('the real chat composer allows engine injection', () => {
-  assert.equal(runProbe({ composerNodes: [element()] }), 'chat');
+  assert.equal(runProbe({ composerNodes: [element()] }).surface, 'chat');
 });
 
 test('unknown/loading pages fail closed', () => {
-  assert.equal(runProbe({ bodyText: 'Welcome' }), 'loading');
+  assert.equal(runProbe({ bodyText: 'Welcome' }).surface, 'loading');
 });

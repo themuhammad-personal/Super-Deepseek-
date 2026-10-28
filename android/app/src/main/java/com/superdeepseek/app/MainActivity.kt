@@ -579,6 +579,10 @@ class MainActivity : ComponentActivity() {
                 }
                 override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
                     super.onPageStarted(view, url, favicon)
+                    // A navigation invalidates any asynchronous probe or asset-load result
+                    // started for the previous document.
+                    pageSurfaceWatchGeneration += 1
+                    handler.removeCallbacks(pageSurfacePoll)
                     // The bridge (storage, files, MCP keys, the Linux sandbox) only
                     // serves the DeepSeek page — never a foreign page this WebView
                     // may be redirected to.
@@ -803,31 +807,53 @@ class MainActivity : ComponentActivity() {
      * (network hooks) first, then the CSS, content.js, the native glue
      * (sd-native.js), sheet gestures, the GenUI renderer and the polish pass.
      */
-    private fun injectBdsScripts(webView: WebView) {
+    private fun injectBdsScripts(webView: WebView, generation: Int, documentToken: String) {
         Thread {
             val a = loadEngineAssets()
             runOnUiThread {
-                if (isFinishing || isDestroyed) return@runOnUiThread
-                // Check and claim in ONE script: two quick onPageFinished calls
-                // would otherwise both see "not injected" before either set the flag.
-                // Anything but "1" (e.g. no answer) injects: a missing engine is worse.
-                webView.evaluateJavascript(ENGINE_CLAIM_JS) { r ->
-                    if (r?.trim('"') == "1") {
-                        Log.d("BDS", "engine already present in this document")
-                        webView.evaluateJavascript(bridgeGate.shimScript(), null)
-                        flushPendingPageActions()
-                        return@evaluateJavascript
+                if (isFinishing || isDestroyed || webView !== officialWebView ||
+                    generation != pageSurfaceWatchGeneration ||
+                    !isTrustedBridgeUrl(runCatching { webView.url }.getOrNull())
+                ) return@runOnUiThread
+
+                // Asset loading is asynchronous. Claim only if the current document is still
+                // the one whose chat surface was detected, and re-probe its live DOM in the
+                // same evaluation that sets the per-document marker. Unknown/auth/stale
+                // outcomes fail closed and leave the surface watcher running for a later chat.
+                webView.evaluateJavascript(buildDeepSeekEngineClaimScript(documentToken)) { r ->
+                    if (isFinishing || isDestroyed || webView !== officialWebView ||
+                        generation != pageSurfaceWatchGeneration ||
+                        !isTrustedBridgeUrl(runCatching { webView.url }.getOrNull())
+                    ) return@evaluateJavascript
+
+                    when (parseDeepSeekEngineClaimResult(r)) {
+                        DeepSeekEngineClaimResult.ALREADY_PRESENT -> {
+                            Log.d("BDS", "engine already present in this chat document")
+                            webView.evaluateJavascript(bridgeGate.shimScript(), null)
+                            flushPendingPageActions()
+                            return@evaluateJavascript
+                        }
+                        DeepSeekEngineClaimResult.CLAIMED -> {
+                            // window.AndroidBridge for the main frame only (token in a closure).
+                            webView.evaluateJavascript(bridgeGate.shimScript(), null)
+                            a.injected?.let { webView.evaluateJavascript(it) { Log.d("BDS", "injected.js done") } }
+                            a.cssJs?.let { webView.evaluateJavascript(it) { Log.d("BDS", "content.css done") } }
+                            a.content?.let { webView.evaluateJavascript(it) { Log.d("BDS", "content.js done") } }
+                            a.native.forEach { (name, src) -> webView.evaluateJavascript(src) { Log.d("BDS", "$name done") } }
+                            // Hides out-of-scope features and polishes; it signals
+                            // AndroidBridge.onUiPolished(), which releases the launch screen.
+                            injectUiPolish(webView)
+                            flushPendingPageActions()
+                        }
+                        DeepSeekEngineClaimResult.AUTH,
+                        DeepSeekEngineClaimResult.LOADING,
+                        DeepSeekEngineClaimResult.STALE,
+                        DeepSeekEngineClaimResult.UNKNOWN -> {
+                            Log.d("BDS", "Engine injection deferred; current page is not the detected chat document")
+                            handler.removeCallbacks(pageSurfacePoll)
+                            handler.postDelayed(pageSurfacePoll, DEEPSEEK_AUTH_POLL_MS)
+                        }
                     }
-                    // window.AndroidBridge for the main frame only (token in a closure).
-                    webView.evaluateJavascript(bridgeGate.shimScript(), null)
-                    a.injected?.let { webView.evaluateJavascript(it) { Log.d("BDS", "injected.js done") } }
-                    a.cssJs?.let { webView.evaluateJavascript(it) { Log.d("BDS", "content.css done") } }
-                    a.content?.let { webView.evaluateJavascript(it) { Log.d("BDS", "content.js done") } }
-                    a.native.forEach { (name, src) -> webView.evaluateJavascript(src) { Log.d("BDS", "$name done") } }
-                    // Hides out-of-scope features and polishes; it signals
-                    // AndroidBridge.onUiPolished(), which releases the launch screen.
-                    injectUiPolish(webView)
-                    flushPendingPageActions()
                 }
             }
         }.start()
@@ -858,13 +884,14 @@ class MainActivity : ComponentActivity() {
                 view !== officialWebView || isFinishing || isDestroyed
             ) return@evaluateJavascript
 
-            when (parseDeepSeekPageSurface(raw)) {
+            val probe = parseDeepSeekPageSurfaceProbe(raw)
+            when (probe.surface) {
                 DeepSeekPageSurface.CHAT -> {
                     handler.removeCallbacks(pageSurfacePoll)
                     Log.d("SuperDeepSeek", "Chat composer detected; loading Super DeepSeek engine")
-                    // These are the same readiness/bar-colour steps used before, but
-                    // only after login has reached the actual chat surface.
-                    injectBdsScripts(view)
+                    // Pass the document identity through the asynchronous asset load.
+                    // The claim script rechecks both identity and surface before changing page state.
+                    injectBdsScripts(view, generation, probe.documentToken)
                     pageFinishedAt = android.os.SystemClock.uptimeMillis()
                     startReadyPoll()
                     syncSystemBarsWithPage()
@@ -919,9 +946,6 @@ class MainActivity : ComponentActivity() {
             "sd-genui-visuals.js", "sd-artifacts.js", "sd-genui-mcp.js", "sd-genui-panel.js",
             "sd-health.js"
         )
-        /** "0" the first time in a document (and marks it), "1" afterwards. */
-        const val ENGINE_CLAIM_JS =
-            "(function(){if(window.__sdEngineInjected)return 1;window.__sdEngineInjected=true;return 0})()"
         const val KEY_ASKED_NOTIFICATIONS = "sd_asked_notifications"
         const val KEY_CHAT_URL = "sd_chat_url"
         const val LIVENESS_TIMEOUT_MS = 8_000L
