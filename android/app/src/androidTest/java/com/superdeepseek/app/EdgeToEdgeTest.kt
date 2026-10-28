@@ -4,6 +4,7 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import androidx.core.view.ViewCompat
 import androidx.test.ext.junit.rules.ActivityScenarioRule
+import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -65,6 +66,10 @@ class EdgeToEdgeTest {
 
     @Test
     fun rootLayout_hasPaddingMatchingSystemBars() {
+        // Wait for attachment and the first inset dispatch. On API 34, reading
+        // root insets during ActivityScenario's initial idle can precede the
+        // native window surface and throw "Window doesn't have a backing surface".
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync()
         activityRule.scenario.onActivity { activity ->
             val rootLayout = activity.window.decorView
                 .findViewById<FrameLayout>(android.R.id.content)
