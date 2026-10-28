@@ -174,7 +174,7 @@ try {
 
   await test('02b JSON envelope honors explicit inline presentation instead of opening an artifact card', async () => {
     const { ctx, page, errors } = await fresh();
-    await page.evaluate(() => { const md = fx.message(); fx.classic(md, 'sds-genui', JSON.stringify({ version: 1, id: 'inline-moon', kind: 'svg', title: 'Inline Moon', presentation: 'inline', payload: { svg: '<svg viewBox="0 0 10 10" width="100%"><circle cx="5" cy="5" r="4" fill="gold"/></svg>' } })); });
+    await page.evaluate(() => { const md = fx.message(); window.__inlinePre = fx.classic(md, 'sds-genui', JSON.stringify({ version: 1, id: 'inline-moon', kind: 'svg', title: 'Inline Moon', presentation: 'inline', payload: { svg: '<svg viewBox="0 0 10 10" width="100%"><circle cx="5" cy="5" r="4" fill="gold"/></svg>' } })); });
     const inline = page.locator('.sd-inline[data-kind="svg"]');
     await inline.waitFor({ timeout: 5000 });
     assert.equal(await page.locator('.sd-art').count(), 0, 'explicit inline content is not stored as a card');
@@ -187,12 +187,54 @@ try {
         frame.getBoundingClientRect().height > 30 && getComputedStyle(frame).opacity !== '0';
     }, null, { timeout: 5000 });
     const box = await frame.boundingBox();
-    const svgBox = await frame.contentFrame().locator('svg').boundingBox();
+    const svgBox = await frame.contentFrame().locator('#sds-root svg[viewBox]').first().boundingBox();
     assert.ok(box && box.height > 30, 'inline SVG frame must have visible layout height');
     assert.ok(svgBox && svgBox.height > 30, 'SVG must have a visible content box');
     assert.ok(svgBox.y + svgBox.height <= box.y + box.height + 1, 'inline frame must contain the full SVG without clipping');
     assert.deepEqual(errors, []);
     await shot(page, '02b-json-inline-presentation.png');
+    // The same live code block may be revised by the model: inline → card must
+    // clear the previous inline choice rather than leave stale state behind.
+    await page.evaluate(() => {
+      window.__inlinePre.textContent = JSON.stringify({ version: 1, id: 'inline-moon', kind: 'svg', title: 'Card Moon', payload: { svg: '<svg viewBox="0 0 10 10" width="100%"><circle cx="5" cy="5" r="4" fill="navy"/></svg>' } });
+    });
+    await page.locator('.sd-art[data-kind="svg"]').waitFor({ timeout: 5000 });
+    await page.waitForFunction(() => !document.querySelector('.sd-inline[data-kind="svg"]'), null, { timeout: 5000 });
+    assert.equal(await page.locator('.sd-art[data-kind="svg"]').count(), 1, 'updated envelope without presentation returns to card mode');
+    await ctx.close();
+  });
+
+  await test('02c streaming JSON switches to inline without leaving a busy card or transient viewer', async () => {
+    const { ctx, page, errors } = await fresh();
+    const beforeInline = '{"version":1,"id":"stream-moon","kind":"svg","title":"Streaming Moon","payload":{"svg":"<svg viewBox=\\"0 0 10 10\\"';
+    const duringInline = '{"version":1,"id":"stream-moon","kind":"svg","title":"Streaming Moon","presentation":"inline","payload":{"svg":"<svg viewBox=\\"0 0 10 10\\" width=\\"100%\\">';
+    await page.evaluate((initial) => {
+      window.__streamMd = fx.message();
+      window.__streamPre = fx.block(window.__streamMd, 'sds-genui', initial);
+    }, beforeInline);
+    const busy = page.locator('.sd-art.sd-art-busy');
+    await busy.waitFor({ timeout: 5000 });
+    await busy.click();
+    await page.locator('#sd-viewer .sd-code').waitFor({ timeout: 5000 });
+    await page.evaluate((partial) => { window.__streamPre.textContent = partial; }, duringInline);
+    await page.waitForFunction(() => !document.querySelector('.sd-art') && !document.querySelector('#sd-viewer'), null, { timeout: 5000 });
+    await page.evaluate(() => {
+      window.__streamPre.textContent = JSON.stringify({ version: 1, id: 'stream-moon', kind: 'svg', title: 'Streaming Moon', presentation: 'inline', payload: { svg: '<svg viewBox="0 0 10 10" width="100%"><circle cx="5" cy="5" r="4" fill="teal"/></svg>' } });
+      fx.para(window.__streamMd, 'completed');
+    });
+    const inline = page.locator('.sd-inline[data-kind="svg"]');
+    await inline.waitFor({ timeout: 5000 });
+    const frame = inline.locator('iframe.sd-frame');
+    await frame.contentFrame().locator('circle').waitFor({ timeout: 5000 });
+    await page.waitForFunction(() => {
+      const stage = document.querySelector('.sd-inline[data-kind="svg"] .sd-vis-stage');
+      const frame = stage && stage.querySelector('iframe.sd-frame');
+      return !!stage && !stage.classList.contains('sd-vis-loading') && !!frame && frame.getBoundingClientRect().height > 30;
+    }, null, { timeout: 5000 });
+    assert.equal(await page.locator('.sd-art').count(), 0);
+    assert.equal(await page.locator('#sd-viewer').count(), 0);
+    assert.deepEqual(errors, []);
+    await shot(page, '02c-stream-inline-presentation.png');
     await ctx.close();
   });
 
