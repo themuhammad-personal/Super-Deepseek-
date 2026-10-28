@@ -975,6 +975,7 @@
     _rawCallCount: rawCallCount,
     _isAutoUserText: isAutoUserText,
     _classifyMessage: classifyMessage,
+    _hideRawCallBlocks: hideRawCallBlocks,
     _stripTags: stripTags,
     _callSummary: callSummary,
     _fmtDur: fmtDur,
