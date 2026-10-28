@@ -94,7 +94,7 @@ test('raw MCP calls count as run steps and automatic results ignore DOM role mis
 });
 
 test('raw call spans support name= and preserve prose around a call', () => {
-  const { R: run } = load();
+  const { win, R: run } = load();
   const raw = 'I will execute it: <SDS:AUTO:MCP url="sandbox" ' +
     'name="run">{"command":"echo one"}</SDS:AUTO:MCP> done.';
   const spans = plain(run._findRawCallSpans(raw));
@@ -104,6 +104,69 @@ test('raw call spans support name= and preserve prose around a call', () => {
   assert.equal(run._rawCallCount('<SDS:AUTO:MCP name="run"/>'), 1);
   assert.equal(raw.slice(0, spans[0].start), 'I will execute it: ');
   assert.equal(raw.slice(spans[0].end), ' done.');
+
+  const text = (value) => {
+    const n = { nodeType: 3, nodeValue: value, parentNode: null };
+    Object.defineProperty(n, 'textContent', { get() { return this.nodeValue; } });
+    n.splitText = function (offset) {
+      const tail = text(this.nodeValue.slice(offset));
+      this.nodeValue = this.nodeValue.slice(0, offset);
+      const siblings = this.parentNode.childNodes;
+      siblings.splice(siblings.indexOf(this) + 1, 0, tail);
+      tail.parentNode = this.parentNode;
+      return tail;
+    };
+    return n;
+  };
+  const el = (tag, children = []) => {
+    const node = {
+      nodeType: 1, tagName: tag, id: '', parentNode: null, childNodes: [], attrs: {},
+      classList: { contains: () => false },
+      hasAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attrs, name); },
+      setAttribute(name, value) { this.attrs[name] = value; },
+      removeAttribute(name) { delete this.attrs[name]; },
+      querySelectorAll: () => [],
+      appendChild(child) { child.parentNode = this; this.childNodes.push(child); return child; },
+      replaceChild(next, old) {
+        const i = this.childNodes.indexOf(old);
+        if (i < 0) throw new Error('old child not found');
+        this.childNodes[i] = next; next.parentNode = this; old.parentNode = null; return old;
+      },
+      insertBefore(next, ref) {
+        const i = this.childNodes.indexOf(ref);
+        if (i < 0) throw new Error('reference child not found');
+        this.childNodes.splice(i, 0, next); next.parentNode = this; return next;
+      },
+      removeChild(child) {
+        const i = this.childNodes.indexOf(child);
+        if (i >= 0) this.childNodes.splice(i, 1);
+        child.parentNode = null; return child;
+      },
+    };
+    Object.defineProperty(node, 'textContent', { get() { return this.childNodes.map(c => c.textContent).join(''); } });
+    Object.defineProperty(node, 'firstChild', { get() { return this.childNodes[0] || null; } });
+    children.forEach(child => node.appendChild(child));
+    return node;
+  };
+  // A tool tag split across sibling paragraphs, with ordinary text on both sides
+  // and a fenced code example that must not be hidden or counted.
+  const first = el('P', [text(' <SDS:AUTO:MCP url="sandbox" ')]);
+  const second = el('P', [text('name="run">{"command":"ls"}</SDS:AUTO:MCP> ')]);
+  const before = text('Before. ');
+  const after = text('After.');
+  const example = el('PRE', [text('<SDS:AUTO:MCP url="sandbox" tool="example"/>')]);
+  const host = el('DIV', [before, first, second, after, example]);
+  host.querySelectorAll = () => [];
+  win.document.createElement = (tag) => el(tag.toUpperCase());
+  assert.equal(run._protocolText(host), 'Before.  <SDS:AUTO:MCP url="sandbox" name="run">{"command":"ls"}</SDS:AUTO:MCP> After.');
+  const hidden = new Set();
+  run._hideRawCallBlocks(host, hidden);
+  assert.equal(hidden.size, 2, 'both DOM text segments of the split call are wrapped');
+  assert.equal(host.textContent, 'Before.  <SDS:AUTO:MCP url="sandbox" name="run">{"command":"ls"}</SDS:AUTO:MCP> After.<SDS:AUTO:MCP url="sandbox" tool="example"/>');
+  assert.equal([...hidden].every(n => n.hasAttribute('data-sd-run-raw-hidden')), true);
+  hidden.forEach(n => run._restoreHiddenRawNode(n));
+  assert.equal(host.textContent, 'Before.  <SDS:AUTO:MCP url="sandbox" name="run">{"command":"ls"}</SDS:AUTO:MCP> After.<SDS:AUTO:MCP url="sandbox" tool="example"/>');
+  assert.equal(host.childNodes.filter(n => n.tagName === 'SPAN').length, 0, 'restore unwraps presentation spans');
 });
 
 test('assistant examples and filenames are not automatic results without the protocol envelope', () => {
