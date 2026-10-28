@@ -100,39 +100,101 @@
 
   function isSandbox(url) { return /^sandbox/i.test(String(url || '')); }
 
+  /** Parse only real attribute names; text inside quoted values is never an attribute. */
+  function hasToolAttribute(attrs) {
+    var s = String(attrs || '');
+    var i = 0;
+    while (i < s.length) {
+      while (i < s.length && /[\s/]/.test(s[i])) i++;
+      var keyStart = i;
+      while (i < s.length && /[A-Za-z0-9_:-]/.test(s[i])) i++;
+      if (i === keyStart) { i++; continue; }
+      var key = s.slice(keyStart, i).toLowerCase();
+      while (i < s.length && /\s/.test(s[i])) i++;
+      if (s[i] !== '=') continue;
+      i++;
+      while (i < s.length && /\s/.test(s[i])) i++;
+      if (i >= s.length) break;
+      var q = s[i];
+      if (q === '"' || q === "'") {
+        i++;
+        while (i < s.length && s[i] !== q) i++;
+        if (i < s.length) i++;
+      } else {
+        while (i < s.length && !/[\s/]/.test(s[i])) i++;
+      }
+      if (key === 'tool' || key === 'toolname' || key === 'name') return true;
+    }
+    return false;
+  }
+
+  function readMcpOpen(s, start, prefixLength) {
+    var i = start + prefixLength;
+    var quote = null;
+    for (; i < s.length; i++) {
+      var c = s[i];
+      if (quote) { if (c === quote) quote = null; }
+      else if (c === '"' || c === "'") quote = c;
+      else if (c === '>') break;
+    }
+    if (i >= s.length) return null;
+    var attrs = s.slice(start + prefixLength, i);
+    return {
+      start: start,
+      tagEnd: i,
+      end: i + 1,
+      attrs: attrs,
+      valid: hasToolAttribute(attrs),
+      selfClosing: /\/\s*$/.test(attrs)
+    };
+  }
+
+  function findNextMcpOpen(s, from) {
+    var re = /<[BS]DS:(?:AUTO:)?MCP\b/gi;
+    re.lastIndex = from;
+    var m;
+    while ((m = re.exec(s))) {
+      var open = readMcpOpen(s, m.index, m[0].length);
+      if (!open) return null;
+      if (open.valid) return open;
+      re.lastIndex = open.end;
+    }
+    return null;
+  }
+
   /**
-   * Find MCP call spans in text. Respect quoted attributes, skip each call body
-   * before scanning for another opener, and accept every supported tool name.
+   * Find real MCP call spans. A streamed call without a close consumes its current
+   * available body, but stops before the next valid call opener so calls don't
+   * merge together. Attribute names inside quoted values are ignored.
    */
   function findRawCallSpans(text) {
     var s = String(text || '');
-    var open = /<[BS]DS:(?:AUTO:)?MCP\b/gi;
+    var re = /<[BS]DS:(?:AUTO:)?MCP\b/gi;
     var spans = [];
     var m;
-    while ((m = open.exec(s))) {
-      var i = m.index + m[0].length;
-      var quote = null;
-      for (; i < s.length; i++) {
-        var c = s[i];
-        if (quote) { if (c === quote) quote = null; }
-        else if (c === '"' || c === "'") quote = c;
-        else if (c === '>') break;
-      }
-      if (i >= s.length) break;
-      var attrs = s.slice(m.index + m[0].length, i);
-      if (!/\b(?:tool|toolName|name)\s*=/i.test(attrs)) {
-        open.lastIndex = i + 1;
+    while ((m = re.exec(s))) {
+      var open = readMcpOpen(s, m.index, m[0].length);
+      if (!open) break;
+      if (!open.valid) {
+        re.lastIndex = open.end;
         continue;
       }
-      var end = i + 1;
-      if (!/\/\s*$/.test(attrs)) {
+      var end = open.end;
+      if (!open.selfClosing) {
         var close = /<\/[BS]DS:(?:AUTO:)?MCP\s*>/gi;
-        close.lastIndex = i + 1;
+        close.lastIndex = open.end;
         var cm = close.exec(s);
-        if (cm) end = cm.index + cm[0].length;
+        var next = findNextMcpOpen(s, open.end);
+        if (cm && (!next || cm.index < next.start)) {
+          end = cm.index + cm[0].length;
+        } else if (next) {
+          end = next.start;
+        } else {
+          end = s.length;
+        }
       }
-      spans.push({ start: m.index, end: end });
-      open.lastIndex = end;
+      spans.push({ start: open.start, end: end });
+      re.lastIndex = end;
     }
     return spans;
   }
