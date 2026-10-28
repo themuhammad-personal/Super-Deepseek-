@@ -19,9 +19,10 @@ Read "Not verified" before relying on anything here.
 | Toolchain | AGP 8.5.2 → 8.13.2, Gradle 8.7 → 8.13, Kotlin 1.9.24 → 2.3.21, compileSdk/targetSdk 34 → 36, build-tools 36.0.0, Robolectric 4.13 → 4.17. androidx on the newest lines that still build on SDK 36 (`androidx.webkit` 1.11.0 → 1.14.0). |
 | 16 KB page sizes | `fetch_sandbox_deps.py` measures `p_align` of every shipped library and reports per-ABI readiness; CI annotates each library that is still 4 KB aligned. It never blocks a build. |
 | Release identity | `repo-consistency.test.mjs` (new): `package.json` ↔ `versionName`, the `versionCode` ladder, the engine module list vs the bundle, and the version named in the build docs. |
+| File-preparation safety | Accessible English/Bengali progress and Stop; active reads/inflation abort, partial results are discarded, newer selections supersede stale work, and setup failures replay the original selection. |
+| Android stability CI | Instrumented coverage now runs on API 30, 34, and 35. Edge-to-edge tests verify insets and contrast-scrim policy without incorrectly requiring bars to remain transparent after page-color synchronization. Failure excerpts are surfaced in Actions annotations. |
 
-Test counts on this commit: engine **206**, Kotlin/Robolectric **283**,
-Chromium acceptance **20**, sandbox-deps ELF self-test **1**.
+**Latest same-branch verification:** Actions run [40689548284](https://github.com/themuhammad-personal/Super-Deepseek-/actions/runs/40689548284), commit `9a8c75e`, succeeded: Node/engine and compliance-harness tests, Chromium GenUI acceptance, Kotlin/Robolectric tests, release APK build/signature checks, and instrumented emulator tests on API 30/34/35. Lint is report-only; release publishing was skipped.
 
 ## What changed in 2.70.1 (full review of 2.70.0)
 
@@ -59,12 +60,13 @@ Every behaviour fix has a test that fails on the old code (JS 159 in total, Kotl
 
 | Gate | Result | Command |
 |---|---|---|
-| Engine unit + contract tests | **149 / 149 pass** (incl. 9 new `sd-files` tests on real ZIP/docx/xlsx/pptx/odt/epub/rtf bytes) | `npm run test:engine` |
+| Engine unit + contract tests | **218 / 218 pass**; includes file preparation, archive limits, cancellation, recovery, and GenUI protocol coverage | `npm run test:engine` |
 | Compliance harness self-test | pass (synthetic fixtures only — not model compliance) | `npm run test:compliance-harness` |
-| Generative UI acceptance (Chromium, 390×844 light + 1280×900 dark, strict-CSP fixture) | **21 / 21 checks pass**, zero page errors | `npm run genui:acceptance` |
-| Live MCP App, `https://mcp.quran.ai` `interactive_study {"surah":1}` | **pass**: 17 model-visible tools, resource `ui://interactive_study_v450.html` (2.3 M chars) read, reader rendered inline (Sūrat al-Fātiḥah), app-only tools called without consent prompts | `npm run genui:mcp-live -- https://mcp.quran.ai interactive_study '{"surah":1}'` |
-| Kotlin unit tests (Robolectric) | **279 / 279 pass** (incl. new `FrameFetchPolicyTest` 5, `McpSseTest`) | `./gradlew testDebugUnitTest` |
-| Release APK | see *Release* below | `./gradlew assembleRelease` |
+| Generative UI acceptance (Chromium, 390×844 light + 1280×900 dark, strict-CSP fixture) | **21 / 21 checks pass**, zero page errors in latest Actions run | `npm run genui:acceptance` |
+| Android emulator instrumentation | pass on **API 30, 34, and 35** (cookies, edge-to-edge, and system-bar behavior) | `./gradlew connectedDebugAndroidTest` in the Actions API matrix |
+| Kotlin unit tests (Robolectric) | pass in the latest Actions run | `./gradlew testDebugUnitTest` |
+| Release APK | build and signature verification pass; publishing skipped | `./gradlew assembleRelease` |
+| Live MCP App, `https://mcp.quran.ai` `interactive_study {"surah":1}` | **Previously verified**: 17 model-visible tools, resource `ui://interactive_study_v450.html` (2.3 M chars) read, reader rendered inline (Sūrat al-Fātiḥah), app-only tools called without consent prompts. Not rerun in this sandbox. | `npm run genui:mcp-live -- https://mcp.quran.ai interactive_study '{"surah":1}'` |
 
 New acceptance checks in 2.70 (`scripts/genui-browser-check.mjs`, screenshots
 in `qa/genui/`):
