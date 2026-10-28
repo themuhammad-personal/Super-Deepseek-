@@ -58,6 +58,16 @@ test('trusted publishing refs protect the permanent signer and treat tags as dat
   assert.equal(workflow.split(trustedPublishCondition).length - 1, 3,
     'permanent signing, APK gate, and release publishing must share trusted-event/ref rules');
 
+  assert.match(workflow, /^permissions:\s*\n  contents: read$/m,
+    'build and test jobs must receive only read access to repository contents');
+  const releaseJob = workflow.match(/\n  release:([\s\S]*)$/)?.[1];
+  assert.ok(releaseJob, 'release job must exist');
+  assert.match(releaseJob, /permissions:\s*\n      contents: write/,
+    'write access must be scoped to the release-publishing job');
+  const historyGuard = workflow.match(/- name: Verify release commit is on trusted main history([\s\S]*?)(?=\n      - name: Prepare permanent release signing key)/)?.[1];
+  assert.ok(historyGuard, 'tag/manual release history must be checked before secrets are exposed');
+  assert.match(historyGuard, /git merge-base --is-ancestor "\$GITHUB_SHA" FETCH_HEAD/);
+
   const releaseConfig = workflow.match(/- id: rel_cfg([\s\S]*?)(?=\n      - uses: softprops\/action-gh-release@v3)/)?.[1];
   assert.ok(releaseConfig, 'release configuration step must exist');
   assert.match(releaseConfig, /if \[\[ "\$GITHUB_REF" == refs\/tags\/v\* \]\]/);
