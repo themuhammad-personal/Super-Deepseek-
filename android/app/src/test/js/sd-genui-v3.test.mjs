@@ -169,9 +169,13 @@ test('prompt: explicit file requests select artifact guidance in auto mode (Engl
     P._resetTurns();
     assert.equal(P.shouldInject(request, {}, P.getConfig()), true, request + ' should recognize a filename-based request');
   }
-  for (const request of ['How does Node.js work?', 'Make this text more formal', 'write a python function', 'কোড লিখে দাও']) {
+  P._resetTurns();
+  const nodePrompt = P.build('How does Node.js work?', { chat: 'node' });
+  assert.doesNotMatch(nodePrompt, /sds-genui — artifacts/, 'a framework-name mention must not select the artifact module');
+  assert.equal(P.selectModules('How does Node.js work?', P.getConfig(), {}).includes('apps'), false);
+  for (const request of ['Make this text more formal', 'write a python function', 'কোড লিখে দাও']) {
     P._resetTurns();
-    assert.equal(P.shouldInject(request, {}, P.getConfig()), false, request + ' must not trigger artifact guidance');
+    assert.equal(P.shouldInject(request, {}, P.getConfig()), false, request + ' must not force artifact guidance');
   }
   P.setConfig({ frequency: 'every_n', interval: 4 }); P._resetTurns();
   P.build('hi', { chat: 'every' });
