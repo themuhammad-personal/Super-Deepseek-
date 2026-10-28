@@ -100,6 +100,47 @@
 
   function isSandbox(url) { return /^sandbox/i.test(String(url || '')); }
 
+  /**
+   * Count MCP tool-call opening tags in rendered text. DeepSeek does not always
+   * turn a call into a loading card, so the run UI cannot depend on that card.
+   */
+  function rawCallCount(text) {
+    var s = String(text || '');
+    var re = /<[BS]DS:(?:AUTO:)?MCP\b/gi;
+    var m, count = 0;
+    while ((m = re.exec(s))) {
+      var i = m.index + m[0].length;
+      var quote = null;
+      for (; i < s.length; i++) {
+        var c = s[i];
+        if (quote) { if (c === quote) quote = null; }
+        else if (c === '"' || c === "'") quote = c;
+        else if (c === '>') break;
+      }
+      if (i >= s.length) break;
+      var attrs = s.slice(m.index + m[0].length, i);
+      if (/\b(?:tool|toolName)\s*=/i.test(attrs)) count++;
+      re.lastIndex = i + 1;
+    }
+    return count;
+  }
+
+  function isAutoUserText(text) {
+    var tx = String(text || '');
+    if (AUTO_RE.test(tx) || /SDS:AUTO_MCP|<\/?SuperDeepSeek>/.test(tx)) return true;
+    return /\bmcp_results?(?:_[A-Za-z0-9_.-]+)?\.txt\b/.test(tx);
+  }
+
+  /** Normalise protocol messages before grouping, independent of DOM role selectors. */
+  function classifyMessage(role, text, loadingCalls, forceAuto) {
+    var auto = !!forceAuto || isAutoUserText(text);
+    if (auto) role = 'user';
+    var calls = role === 'assistant'
+      ? Math.max(Number(loadingCalls) || 0, rawCallCount(text))
+      : 0;
+    return { role: role, auto: auto, calls: calls };
+  }
+
   function serverLabel(url) {
     if (!url || isSandbox(url)) return t('Linux sandbox', 'লিনাক্স স্যান্ডবক্স');
     var m = String(url).match(/^[a-z]+:\/\/([^/?#]+)/i);
@@ -335,9 +376,7 @@
   /** An automatic message of the engine (tool results, an agent nudge). */
   function isAutoUser(el) {
     if (el.querySelector('.bds-mcp-result-card, .bds-mcp-error-card')) return true;
-    var tx = el.textContent || '';
-    if (AUTO_RE.test(tx) || /SDS:AUTO_MCP|<\/?SuperDeepSeek>/.test(tx)) return true;
-    if (/\bmcp_results?(?:_[A-Za-z0-9_.-]+)?\.txt\b/.test(tx)) return true;
+    if (isAutoUserText(el.textContent || '')) return true;
     // A nudge is wiped by the engine's sanitiser, leaving nothing visible.
     return !!el.querySelector('.bds-hidden-message') && !visibleText(el);
   }
@@ -362,6 +401,45 @@
     }
     rowCache.set(msg, row);
     return row;
+  }
+
+  /**
+   * Hide only the rendered block containing a raw MCP call tag; do not rewrite
+   * DeepSeek's message. The run card/drawer becomes the readable presentation.
+   * Original nodes stay in the DOM and are restored if the feature is disabled.
+   */
+  var hiddenRawNodes = new Set();
+  var RAW_BLOCK_SELECTOR = 'p, pre, li, blockquote';
+
+  function hideRawCallBlocks(host, nextHidden) {
+    if (!host || !host.querySelectorAll) return;
+    var candidates = host.querySelectorAll(RAW_BLOCK_SELECTOR);
+    var found = false;
+    for (var i = 0; i < candidates.length; i++) {
+      var node = candidates[i];
+      if (!rawCallCount(node.textContent || '')) continue;
+      // Prefer the innermost block so explanatory text outside it stays visible.
+      var nested = node.querySelectorAll(RAW_BLOCK_SELECTOR);
+      var childHasCall = false;
+      for (var j = 0; j < nested.length; j++) {
+        if (rawCallCount(nested[j].textContent || '')) { childHasCall = true; break; }
+      }
+      if (childHasCall) continue;
+      nextHidden.add(node);
+      found = true;
+    }
+    if (found) return;
+
+    // Some DOM variants put text directly in the markdown wrapper. Only use
+    // this fallback when it starts with the tag, never swallowing earlier prose.
+    var wrappers = host.querySelectorAll('.ds-markdown, .fbb737a4, .ds-collapsible-text');
+    for (var k = 0; k < wrappers.length; k++) {
+      var text = String(wrappers[k].textContent || '').trim();
+      if (/^<[BS]DS:(?:AUTO:)?MCP\b/i.test(text) && rawCallCount(text)) {
+        nextHidden.add(wrappers[k]);
+        return;
+      }
+    }
   }
 
   function generating() {
@@ -558,10 +636,13 @@
     var els = messageEls();
     var list = els.map(function (el) {
       var role = roleOf(el);
-      return { role: role, auto: role === 'user' && isAutoUser(el), calls: role === 'assistant' ? el.querySelectorAll('.bds-mcp-loading').length : 0 };
+      var auto = isAutoUser(el);
+      return classifyMessage(role, el.textContent || '',
+        role === 'assistant' ? el.querySelectorAll('.bds-mcp-loading').length : 0, auto);
     });
     var runs = groupRuns(list);
     var nextHidden = new Set();
+    var nextRawHidden = new Set();
     var nextHosts = new Set();
     var seen = new Set();
     var realAfter = 0;
@@ -576,6 +657,7 @@
       var host = els[run.host];
       host.setAttribute('data-sd-run-host', '');
       nextHosts.add(host);
+      hideRawCallBlocks(host, nextRawHidden);
       seen.add(ensureCard(info));
       if (info.running) anyRunning = true;
       if (run.last) lastRunKey = info.key;
@@ -583,6 +665,9 @@
     hiddenRows.forEach(function (r) { if (!nextHidden.has(r)) r.removeAttribute('data-sd-run-hidden'); });
     nextHidden.forEach(function (r) { if (!r.hasAttribute('data-sd-run-hidden')) r.setAttribute('data-sd-run-hidden', ''); });
     hiddenRows = nextHidden;
+    hiddenRawNodes.forEach(function (node) { if (!nextRawHidden.has(node)) node.removeAttribute('data-sd-run-raw-hidden'); });
+    nextRawHidden.forEach(function (node) { if (!node.hasAttribute('data-sd-run-raw-hidden')) node.setAttribute('data-sd-run-raw-hidden', ''); });
+    hiddenRawNodes = nextRawHidden;
     hostEls.forEach(function (h) { if (!nextHosts.has(h)) h.removeAttribute('data-sd-run-host'); });
     hostEls = nextHosts;
     cards.forEach(function (c) {
@@ -596,6 +681,8 @@
   function reset() {
     hiddenRows.forEach(function (r) { r.removeAttribute('data-sd-run-hidden'); });
     hiddenRows = new Set();
+    hiddenRawNodes.forEach(function (node) { node.removeAttribute('data-sd-run-raw-hidden'); });
+    hiddenRawNodes = new Set();
     hostEls.forEach(function (h) { h.removeAttribute('data-sd-run-host'); });
     hostEls = new Set();
     cards.forEach(function (c) { c.remove(); });
@@ -769,6 +856,7 @@
 
   var CSS = [
     '[data-sd-run-hidden]{display:none!important}',
+    '[data-sd-run-raw-hidden]{display:none!important}',
     '[data-sd-run-host] .bds-mcp-loading{display:none!important}',
     'html.sd-run-card-visible #sd-agent-chip{display:none!important}',
     '.sd-run-card{margin:10px 0 4px;padding:10px 12px;border-radius:14px;border:1px solid var(--bds-border,rgba(127,127,127,.25));',
@@ -872,6 +960,9 @@
     _branch: branch,
     _matchRun: matchRun,
     _parseResults: parseResults,
+    _rawCallCount: rawCallCount,
+    _isAutoUserText: isAutoUserText,
+    _classifyMessage: classifyMessage,
     _stripTags: stripTags,
     _callSummary: callSummary,
     _fmtDur: fmtDur,
