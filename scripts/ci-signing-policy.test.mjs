@@ -11,11 +11,12 @@ test('the Arena working branch runs CI without enabling publication', () => {
   assert.ok(workflow.includes("if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main'"));
 });
 
-test('CI runs connected Android tests on an API 35 emulator', () => {
+test('CI runs connected Android tests across the stability-plan API matrix', () => {
   assert.ok(workflow.includes('  android-instrumented-tests:'));
   assert.ok(workflow.includes('uses: reactivecircus/android-emulator-runner@v2'));
   assert.ok(workflow.includes('Enable KVM for hardware-accelerated emulator'));
-  assert.ok(workflow.includes('api-level: 35'));
+  assert.ok(workflow.includes('api-level: [30, 34, 35]'));
+  assert.ok(workflow.includes('api-level: ${{ matrix.api-level }}'));
   assert.ok(workflow.includes("script: bash -o pipefail -c 'cd android && ./gradlew --no-daemon connectedDebugAndroidTest --stacktrace --info"));
   assert.ok(workflow.includes('name: android-instrumented-test-reports'));
   assert.ok(workflow.includes('cp -r android/app/src/main/bds-assets/bds android/app/src/main/assets/bds'));
