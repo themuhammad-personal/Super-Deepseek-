@@ -39,7 +39,7 @@ jobs:
             android/**/gradle-wrapper.properties
       - uses: android-actions/setup-android@v4
         with:
-          packages: platform-tools platforms;android-34 build-tools;34.0.0
+          packages: platform-tools platforms;android-36 build-tools;36.0.0
       - name: Write Android local.properties
         run: printf 'sdk.dir=%s\n' "$ANDROID_HOME" > android/local.properties
       - name: Install NPM Dependencies
@@ -176,7 +176,7 @@ jobs:
           unzip -l "$APK_NAME" | grep -E "lib/.*\.so|assets/sandbox" || echo "::warning::APK has no sandbox runtime"
       - name: Verify APK Signature
         run: |
-          $ANDROID_HOME/build-tools/34.0.0/apksigner verify --verbose "${{ steps.prep.outputs.apk_path }}"
+          $ANDROID_HOME/build-tools/36.0.0/apksigner verify --verbose "${{ steps.prep.outputs.apk_path }}"
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v7
         with:
@@ -205,7 +205,7 @@ jobs:
             android/**/gradle-wrapper.properties
       - uses: android-actions/setup-android@v4
         with:
-          packages: platform-tools platforms;android-34 build-tools;34.0.0
+          packages: platform-tools platforms;android-36 build-tools;36.0.0
       - name: Android Lint
         working-directory: android
         run: |
