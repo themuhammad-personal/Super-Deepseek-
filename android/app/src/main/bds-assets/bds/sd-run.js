@@ -101,26 +101,15 @@
   function isSandbox(url) { return /^sandbox/i.test(String(url || '')); }
 
   /**
-   * Count MCP tool-call opening tags in rendered text. DeepSeek does not always
-   * turn a call into a loading card, so the run UI cannot depend on that card.
+   * Find MCP call spans in text. Respect quoted attributes, skip each call body
+   * before scanning for another opener, and accept every supported tool name.
    */
-  function rawCallCount(text) {
+  function findRawCallSpans(text) {
     var s = String(text || '');
-    // Reuse the agent's quote-aware protocol parser when available. It skips
-    // tag-looking text inside a call body and handles incomplete streamed calls.
-    try {
-      var api = window.__sdAgent;
-      if (api && typeof api._parseTags === 'function') {
-        var tags = api._parseTags(s) || [];
-        return tags.filter(function (tag) {
-          var attrs = tag && tag.attrs || {};
-          return attrs.tool != null || attrs.toolName != null;
-        }).length;
-      }
-    } catch (_) {}
-    var re = /<[BS]DS:(?:AUTO:)?MCP\b/gi;
-    var m, count = 0;
-    while ((m = re.exec(s))) {
+    var open = /<[BS]DS:(?:AUTO:)?MCP\b/gi;
+    var spans = [];
+    var m;
+    while ((m = open.exec(s))) {
       var i = m.index + m[0].length;
       var quote = null;
       for (; i < s.length; i++) {
@@ -131,19 +120,40 @@
       }
       if (i >= s.length) break;
       var attrs = s.slice(m.index + m[0].length, i);
-      if (/\b(?:tool|toolName)\s*=/i.test(attrs)) count++;
-      re.lastIndex = i + 1;
+      if (!/\b(?:tool|toolName|name)\s*=/i.test(attrs)) {
+        open.lastIndex = i + 1;
+        continue;
+      }
+      var end = i + 1;
+      if (!/\/\s*$/.test(attrs)) {
+        var close = /<\/[BS]DS:(?:AUTO:)?MCP\s*>/gi;
+        close.lastIndex = i + 1;
+        var cm = close.exec(s);
+        if (cm) end = cm.index + cm[0].length;
+      }
+      spans.push({ start: m.index, end: end });
+      open.lastIndex = end;
     }
-    return count;
+    return spans;
+  }
+
+  function rawCallCount(text) { return findRawCallSpans(text).length; }
+
+  function isProtocolResultText(text) {
+    var tx = String(text || '').trim();
+    return /^<SuperDeepSeek>\s*[\s\S]*?\[SDS:AUTO_MCP_(RESULT|ERROR)\][\s\S]*?\[\/SDS:AUTO_MCP_\1\]\s*<\/SuperDeepSeek>$/i.test(tx);
   }
 
   function isAutoUserText(text, role) {
-    var tx = String(text || '');
-    // Explicit engine protocol markers override unreliable DOM role selectors.
-    if (AUTO_RE.test(tx) || /SDS:AUTO_MCP/.test(tx)) return true;
-    // Filename fallback is only for user messages; assistant prose may mention it.
-    return String(role || '').toLowerCase() === 'user' &&
-      /\bmcp_results?(?:_[A-Za-z0-9_.-]+)?\.txt\b/.test(tx);
+    var tx = String(text || '').trim();
+    var r = String(role || '').toLowerCase();
+    // Assistant replies are auto protocol traffic only when the whole message
+    // is the structured result/error envelope, not because it quotes a marker.
+    if (r === 'assistant') return isProtocolResultText(tx);
+    if (r !== 'user') return false;
+    return isProtocolResultText(tx) ||
+      /^\[[BS]DS:AUTO(?:\s|\]|_)/i.test(tx) ||
+      /\bmcp_results?(?:_[A-Za-z0-9_.-]+)?\.txt\b/i.test(tx);
   }
 
   /** Normalise protocol messages before grouping, independent of DOM role selectors. */
@@ -381,6 +391,33 @@
     return r ? String(r).toLowerCase() : 'assistant';
   }
 
+  /**
+   * Read text for protocol detection while ignoring rendered code examples and
+   * our own activity UI. Hidden raw-call spans remain part of the source text.
+   */
+  function collectTextEntries(root, out, hiddenParent) {
+    if (!root) return;
+    if (root.nodeType === 3) {
+      if (root.nodeValue) out.push({ node: root, hidden: hiddenParent || null });
+      return;
+    }
+    if (root.nodeType !== 1) return;
+    var tag = String(root.tagName || '').toUpperCase();
+    if (tag === 'PRE' || tag === 'CODE' || tag === 'SCRIPT' || tag === 'STYLE') return;
+    if (root.id === 'sd-run-sheet' ||
+        (root.classList && root.classList.contains('sd-run-card'))) return;
+    var hidden = root.hasAttribute && root.hasAttribute('data-sd-run-raw-hidden') ? root : hiddenParent;
+    var children = root.childNodes;
+    if (!children || !children.length) return;
+    for (var i = 0; i < children.length; i++) collectTextEntries(children[i], out, hidden);
+  }
+
+  function protocolText(root) {
+    var entries = [];
+    collectTextEntries(root, entries, null);
+    return entries.length ? entries.map(function (e) { return e.node.nodeValue || ''; }).join('') : String(root && root.textContent || '');
+  }
+
   function visibleText(el) {
     var parts = el.querySelectorAll('.fbb737a4, .ds-markdown, .ds-collapsible-text');
     var s = '';
@@ -389,9 +426,10 @@
   }
 
   /** An automatic message of the engine (tool results, an agent nudge). */
-  function isAutoUser(el, role) {
+  function isAutoUser(el, role, text) {
+    role = role || roleOf(el);
     if (el.querySelector('.bds-mcp-result-card, .bds-mcp-error-card')) return true;
-    if (isAutoUserText(el.textContent || '', role)) return true;
+    if (isAutoUserText(text == null ? protocolText(el) : text, role)) return true;
     // A nudge is wiped by the engine's sanitiser, leaving nothing visible.
     return !!el.querySelector('.bds-hidden-message') && !visibleText(el);
   }
@@ -419,42 +457,68 @@
   }
 
   /**
-   * Hide only the rendered block containing a raw MCP call tag; do not rewrite
-   * DeepSeek's message. The run card/drawer becomes the readable presentation.
-   * Original nodes stay in the DOM and are restored if the feature is disabled.
+   * Hide exact raw-call text spans, not whole paragraphs. This preserves adjacent
+   * prose, fenced code examples, and calls whose tag is split between text nodes.
+   * The selected text stays in reversible span wrappers in the original DOM.
    */
   var hiddenRawNodes = new Set();
-  var RAW_BLOCK_SELECTOR = 'p, pre, li, blockquote';
+
+  function restoreHiddenRawNode(node) {
+    if (!node) return;
+    if (node.removeAttribute) node.removeAttribute('data-sd-run-raw-hidden');
+    var parent = node.parentNode;
+    if (!parent || String(node.tagName || '').toUpperCase() !== 'SPAN') return;
+    while (node.firstChild) parent.insertBefore(node.firstChild, node);
+    parent.removeChild(node);
+  }
 
   function hideRawCallBlocks(host, nextHidden) {
     if (!host || !host.querySelectorAll) return;
-    var candidates = host.querySelectorAll(RAW_BLOCK_SELECTOR);
-    var found = false;
-    for (var i = 0; i < candidates.length; i++) {
-      var node = candidates[i];
-      if (!rawCallCount(node.textContent || '')) continue;
-      // Prefer the innermost block so explanatory text outside it stays visible.
-      var nested = node.querySelectorAll(RAW_BLOCK_SELECTOR);
-      var childHasCall = false;
-      for (var j = 0; j < nested.length; j++) {
-        if (rawCallCount(nested[j].textContent || '')) { childHasCall = true; break; }
-      }
-      if (childHasCall) continue;
-      nextHidden.add(node);
-      found = true;
-    }
-    if (found) return;
+    var entries = [];
+    collectTextEntries(host, entries, null);
+    if (!entries.length) return;
 
-    // Some DOM variants put text directly in the markdown wrapper. Only use
-    // this fallback when it starts with the tag, never swallowing earlier prose.
-    var wrappers = host.querySelectorAll('.ds-markdown, .fbb737a4, .ds-collapsible-text');
-    for (var k = 0; k < wrappers.length; k++) {
-      var text = String(wrappers[k].textContent || '').trim();
-      if (/^<[BS]DS:(?:AUTO:)?MCP\b/i.test(text) && rawCallCount(text)) {
-        nextHidden.add(wrappers[k]);
-        return;
-      }
-    }
+    var full = '';
+    entries.forEach(function (entry) {
+      entry.start = full.length;
+      full += entry.node.nodeValue || '';
+      entry.end = full.length;
+    });
+    var calls = findRawCallSpans(full);
+    if (!calls.length) return;
+
+    var operations = [];
+    calls.forEach(function (call) {
+      entries.forEach(function (entry) {
+        var start = Math.max(call.start, entry.start);
+        var end = Math.min(call.end, entry.end);
+        if (end <= start) return;
+        if (entry.hidden) nextHidden.add(entry.hidden);
+        else operations.push({
+          node: entry.node,
+          start: start - entry.start,
+          end: end - entry.start,
+          absoluteStart: start
+        });
+      });
+    });
+    // Split from right to left so earlier offsets in a shared text node remain valid.
+    operations.sort(function (a, b) { return b.absoluteStart - a.absoluteStart; });
+    operations.forEach(function (op) {
+      var node = op.node;
+      var parent = node && node.parentNode;
+      if (!parent || typeof node.splitText !== 'function' || !document.createElement) return;
+      var value = String(node.nodeValue || '');
+      if (op.start < 0 || op.end > value.length || op.start >= op.end) return;
+      if (op.end < value.length) node.splitText(op.end);
+      var segment = op.start > 0 ? node.splitText(op.start) : node;
+      var wrapper = document.createElement('span');
+      wrapper.setAttribute('data-sd-run-raw-hidden', '');
+      wrapper.setAttribute('aria-hidden', 'true');
+      segment.parentNode.replaceChild(wrapper, segment);
+      wrapper.appendChild(segment);
+      nextHidden.add(wrapper);
+    });
   }
 
   function generating() {
@@ -474,7 +538,7 @@
   function currentKey() {
     var els = messageEls();
     for (var i = els.length - 1; i >= 0; i--) {
-      if (roleOf(els[i]) === 'user' && !isAutoUser(els[i])) return keyFor(userText(els[i]));
+      if (roleOf(els[i]) === 'user' && !isAutoUser(els[i], 'user')) return keyFor(userText(els[i]));
     }
     return sessionId() + '|live';
   }
@@ -651,8 +715,9 @@
     var els = messageEls();
     var list = els.map(function (el) {
       var role = roleOf(el);
-      var auto = isAutoUser(el, role);
-      return classifyMessage(role, el.textContent || '',
+      var text = protocolText(el);
+      var auto = isAutoUser(el, role, text);
+      return classifyMessage(role, text,
         role === 'assistant' ? el.querySelectorAll('.bds-mcp-loading').length : 0, auto);
     });
     var runs = groupRuns(list);
@@ -680,7 +745,7 @@
     hiddenRows.forEach(function (r) { if (!nextHidden.has(r)) r.removeAttribute('data-sd-run-hidden'); });
     nextHidden.forEach(function (r) { if (!r.hasAttribute('data-sd-run-hidden')) r.setAttribute('data-sd-run-hidden', ''); });
     hiddenRows = nextHidden;
-    hiddenRawNodes.forEach(function (node) { if (!nextRawHidden.has(node)) node.removeAttribute('data-sd-run-raw-hidden'); });
+    hiddenRawNodes.forEach(function (node) { if (!nextRawHidden.has(node)) restoreHiddenRawNode(node); });
     nextRawHidden.forEach(function (node) { if (!node.hasAttribute('data-sd-run-raw-hidden')) node.setAttribute('data-sd-run-raw-hidden', ''); });
     hiddenRawNodes = nextRawHidden;
     hostEls.forEach(function (h) { if (!nextHosts.has(h)) h.removeAttribute('data-sd-run-host'); });
@@ -696,7 +761,7 @@
   function reset() {
     hiddenRows.forEach(function (r) { r.removeAttribute('data-sd-run-hidden'); });
     hiddenRows = new Set();
-    hiddenRawNodes.forEach(function (node) { node.removeAttribute('data-sd-run-raw-hidden'); });
+    hiddenRawNodes.forEach(function (node) { restoreHiddenRawNode(node); });
     hiddenRawNodes = new Set();
     hostEls.forEach(function (h) { h.removeAttribute('data-sd-run-host'); });
     hostEls = new Set();
@@ -976,6 +1041,8 @@
     _matchRun: matchRun,
     _parseResults: parseResults,
     _rawCallCount: rawCallCount,
+    _findRawCallSpans: findRawCallSpans,
+    _isProtocolResultText: isProtocolResultText,
     _isAutoUserText: isAutoUserText,
     _classifyMessage: classifyMessage,
     _hideRawCallBlocks: hideRawCallBlocks,
