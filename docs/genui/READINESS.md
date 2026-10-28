@@ -1,7 +1,6 @@
 # Generative UI — readiness report (2.72.0, 2026-10-28)
 
-**Status:** implemented and verified in automated tests (JVM/Robolectric,
-Node, real Chromium) and against real public MCP servers.
+**Status:** automated suites passed for the reviewed main commit below. This is not a physical-device or live-model sign-off. The public MCP check in historical notes was not repeated on this main commit.
 
 **Not yet verified:**
 
@@ -22,7 +21,7 @@ Read "Not verified" before relying on anything here.
 | File-preparation safety | Accessible English/Bengali progress and Stop; active reads/inflation abort, partial results are discarded, newer selections supersede stale work, and setup failures replay the original selection. |
 | Android stability CI | Instrumented coverage now runs on API 30, 34, and 35. Edge-to-edge checks verify window configuration and contrast-scrim policy; inset-padding behavior has deterministic coverage in `KeyboardInsetTest` (avoiding timing-sensitive reads from an emulator window surface). Failure excerpts are surfaced in Actions annotations. |
 
-**Latest full feature verification:** Actions run [40692288593](https://github.com/themuhammad-personal/Super-Deepseek-/actions/runs/40692288593), commit `9f77717`, succeeded: Node/engine and compliance-harness tests, Chromium GenUI acceptance, Kotlin/Robolectric tests, release APK build/signature checks, and instrumented emulator tests on API 30/34/35. Lint is report-only; release publishing was skipped.
+**Latest reviewed main verification:** [Actions run #109](https://github.com/themuhammad-personal/Super-Deepseek-/actions/runs/40732707579), commit `8894cf49fceff8c779c0fa9c0d06f5dbd37bfc45`, succeeded. The run reported 232 engine/Node tests, 29/29 Chromium GenUI acceptance checks, 5 script-policy tests, Kotlin/Robolectric `BUILD SUCCESSFUL`, and 5/5 instrumentation tests on each of API 30, 34, and 35. It built, signature-checked, checksumed, and published the latest APK. Physical-device, live-site/model, and current live MCP verification remain separate.
 
 ## What changed in 2.70.1 (full review of 2.70.0)
 
@@ -58,14 +57,17 @@ Every behaviour fix has a test that fails on the old code (JS 159 in total, Kotl
 
 ## Verified (evidence you can re-run)
 
+Release-wide workflow, device-only checklist and log redaction policy: [`docs/RELEASE-READINESS.md`](../RELEASE-READINESS.md).
+
 | Gate | Result | Command |
 |---|---|---|
-| Engine unit + contract tests | **218 / 218 pass**; includes file preparation, archive limits, cancellation, recovery, and GenUI protocol coverage | `npm run test:engine` |
+| Engine unit + contract tests | **232 / 232 pass in main CI run #109**; dated snapshot only, so the current runner output remains authoritative | `npm run test:engine` |
 | Compliance harness self-test | pass (synthetic fixtures only — not model compliance) | `npm run test:compliance-harness` |
-| Generative UI acceptance (Chromium, 390×844 light + 1280×900 dark, strict-CSP fixture) | **21 / 21 checks pass**, zero page errors in latest Actions run | `npm run genui:acceptance` |
-| Android emulator instrumentation | pass on **API 30, 34, and 35** (cookies, edge-to-edge, and system-bar behavior) | `./gradlew connectedDebugAndroidTest` in the Actions API matrix |
+| Generative UI acceptance (Chromium, 390×844 light + 1280×900 dark, strict-CSP fixture) | **29 / 29 checks pass in main CI run #109**; fixtures use a mocked bridge, not the live site or Android WebView | `npm run genui:acceptance` |
+| Android emulator instrumentation | **5 / 5 pass on each of API 30, 34, and 35** in run #109; current tests cover cookies and edge-to-edge/system bars only | `./gradlew connectedDebugAndroidTest` in the Actions API matrix |
+| 16 KB page-size Linux sandbox | **FAIL / BLOCKED**: run #109 reports 4 KB-aligned native libraries for several ABIs, including `libproot-loader32.so` in `arm64-v8a`; do not claim 16 KB readiness | `python3 scripts/fetch_sandbox_deps.py` (alignment report) |
 | Kotlin unit tests (Robolectric) | pass in the latest Actions run | `./gradlew testDebugUnitTest` |
-| Release APK | build and signature verification pass; publishing skipped | `./gradlew assembleRelease` |
+| Release APK | build, signature validity, checksum generation, and publication pass in run #109; certificate continuity and actual manifest identity were not independently confirmed by that run | `./gradlew assembleRelease` + Actions run #109 |
 | Live MCP App, `https://mcp.quran.ai` `interactive_study {"surah":1}` | **Previously verified**: 17 model-visible tools, resource `ui://interactive_study_v450.html` (2.3 M chars) read, reader rendered inline (Sūrat al-Fātiḥah), app-only tools called without consent prompts. Not rerun in this sandbox. | `npm run genui:mcp-live -- https://mcp.quran.ai interactive_study '{"surah":1}'` |
 
 New acceptance checks in 2.70 (`scripts/genui-browser-check.mjs`, screenshots

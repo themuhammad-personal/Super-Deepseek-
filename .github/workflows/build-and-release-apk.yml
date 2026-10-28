@@ -233,6 +233,393 @@ jobs:
       - name: Verify APK Signature
         run: |
           $ANDROID_HOME/build-tools/36.0.0/apksigner verify --verbose "${{ steps.prep.outputs.apk_path }}"
+      - name: Gate publishable APK identity, checksum, signature, and sandbox
+        if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.publish == true)
+        env:
+          APK_PATH: ${{ steps.prep.outputs.apk_path }}
+          EXPECTED_CERT_SHA256: 75ebff1ca33e27e8f14d98122dc5e6db811a1c77f37133b7bbbd24cd75ba3803
+        run: |
+          set -euo pipefail
+          test -s "$APK_PATH"
+          test -s "$APK_PATH.sha256"
+          sha256sum --check "$APK_PATH.sha256"
+
+          EXPECTED_VERSION="$(node -p "require('./package.json').version")"
+          BADGING="$($ANDROID_HOME/build-tools/36.0.0/aapt dump badging "$APK_PATH")"
+          APP_ID="$(printf '%s\n' "$BADGING" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -n 1)"
+          APK_VERSION="$(printf '%s\n' "$BADGING" | sed -n "s/^package:.*versionName='\([^']*\)'.*/\1/p" | head -n 1)"
+          APK_VERSION_CODE="$(printf '%s\n' "$BADGING" | sed -n "s/^package:.*versionCode='\([^']*\)'.*/\1/p" | head -n 1)"
+          VERSION_CODE_BASE="$(sed -nE 's/.*versionCode = \(([0-9_]+)L \+ bdsBuildId\).*/\1/p' android/app/build.gradle.kts | tr -d '_')"
+          if [[ "$APP_ID" != "com.superdeepseek.app" ]]; then
+            echo "::error::Unexpected APK applicationId: $APP_ID"
+            exit 1
+          fi
+          if [[ "$APK_VERSION" != "$EXPECTED_VERSION" ]]; then
+            echo "::error::APK versionName $APK_VERSION does not match package.json $EXPECTED_VERSION"
+            exit 1
+          fi
+          if [[ -z "$VERSION_CODE_BASE" || -z "$APK_VERSION_CODE" || "$APK_VERSION_CODE" -ne "$((VERSION_CODE_BASE + GITHUB_RUN_NUMBER))" ]]; then
+            echo "::error::APK versionCode does not match the current CI build identity"
+            exit 1
+          fi
+
+          APK_ENTRIES="$(unzip -Z1 "$APK_PATH")"
+          grep -qx 'assets/sandbox/rootfs.json' <<< "$APK_ENTRIES" || { echo "::error::APK is missing the Alpine rootfs manifest"; exit 1; }
+          grep -Eq '^lib/[^/]+/libproot\.so
+        uses: actions/upload-artifact@v7
+        with:
+          name: super-deepseek-apk
+          path: |
+            *.apk
+            *.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  android-instrumented-tests:
+    name: Android Emulator Tests (API ${{ matrix.api-level }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # Keep the API 30/34/35 emulator coverage required by the stability plan.
+        api-level: [30, 34, 35]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle*
+            android/**/gradle-wrapper.properties
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools platforms;android-36 build-tools;36.0.0
+      - name: Write Android local.properties and stage engine
+        run: |
+          printf 'sdk.dir=%s\n' "$ANDROID_HOME" > android/local.properties
+          mkdir -p android/app/src/main/assets
+          rm -rf android/app/src/main/assets/bds
+          cp -r android/app/src/main/bds-assets/bds android/app/src/main/assets/bds
+          chmod +x android/gradlew
+      - name: Enable KVM for hardware-accelerated emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run Android instrumented tests on API ${{ matrix.api-level }}
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: bash -o pipefail -c 'cd android && ./gradlew --no-daemon connectedDebugAndroidTest --stacktrace --info 2>&1 | tee /tmp/android-instrumented.log'
+      - name: Annotate Android instrumentation failures
+        if: failure()
+        run: |
+          if [ -f /tmp/android-instrumented.log ]; then
+            grep -E 'FAILURES|Tests run:|FAILED|Exception|Assertion|Expected:|Actual:|INSTRUMENTATION_STATUS|Error in |Process:' /tmp/android-instrumented.log | tail -80 > /tmp/android-instrumented-failures.log || true
+            if [ -s /tmp/android-instrumented-failures.log ]; then
+              while IFS= read -r line; do echo "::error::$line"; done < /tmp/android-instrumented-failures.log
+            else
+              tail -40 /tmp/android-instrumented.log | while IFS= read -r line; do echo "::error::$line"; done
+            fi
+          else
+            echo '::error::Android instrumentation runner did not create /tmp/android-instrumented.log'
+          fi
+      - name: Summarize Android instrumentation result
+        if: always()
+        run: |
+          if [ -f /tmp/android-instrumented.log ]; then
+            {
+              echo '### Android instrumentation log (tail)'
+              echo '```text'
+              tail -180 /tmp/android-instrumented.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Android instrumentation log was not created.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload Android instrumentation reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-instrumented-test-reports
+          path: |
+            /tmp/android-instrumented.log
+            android/app/build/reports/androidTests/connected/**
+            android/app/build/outputs/androidTest-results/connected/**
+          if-no-files-found: ignore
+          retention-days: 14
+
+  lint:
+    # Diagnostics only: Android Lint and Kotlin compiler warnings, reported as
+    # annotations. Never blocks the build or the release.
+    name: Lint (report only)
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle*
+            android/**/gradle-wrapper.properties
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools platforms;android-36 build-tools;36.0.0
+      - name: Android Lint
+        working-directory: android
+        run: |
+          printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
+          chmod +x ./gradlew
+          ./gradlew --no-daemon lintDebug -Dorg.gradle.jvmargs=-Xmx3g 2>&1 | tee /tmp/gradle-lint.log || true
+          python3 ../scripts/ci_annotate_lint.py app/build/reports/lint-results-debug.xml /tmp/gradle-lint.log
+
+  release:
+    name: Publish Release
+    needs: [build-apk, android-instrumented-tests]
+    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.publish == true)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: super-deepseek-apk
+      - id: rel_cfg
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"; echo "title=Super DeepSeek v${VERSION}" >> "$GITHUB_OUTPUT"; else echo "tag=latest" >> "$GITHUB_OUTPUT"; echo "title=Super DeepSeek (Continuous Build #${{ github.run_number }})" >> "$GITHUB_OUTPUT"; fi
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.rel_cfg.outputs.tag }}
+          name: ${{ steps.rel_cfg.outputs.title }}
+          body: |
+            ### Super DeepSeek for Android
+
+            **Version:** `${{ steps.rel_cfg.outputs.version }}`
+            **Build:** `${{ github.run_number }}`
+            **Commit:** `${{ github.sha }}`
+
+            The official DeepSeek chat, supercharged: the Super DeepSeek engine runs on
+            top of chat.deepseek.com inside a native Android shell.
+
+            #### Highlights
+            - An AI agent with its own Linux (Alpine) that writes, runs and tests code until the task is done; Stop is always there
+            - Linux Studio: terminal, files and live preview
+            - Slash commands, snippets and a command palette
+            - Memory, personas, system prompts, skills and projects
+            - MCP servers, Deep Research, web fetch, code runners and file tools
+            - Export chats (Markdown, PDF, HTML, image), light and dark themes
+            - Native file / camera picker, downloads, haptics and in-app updates
+
+            Install on Android 8.0+ and sign in with your DeepSeek account.
+            Builds are signed with the same key, so each one installs as an update.
+
+            > **Coming from a build before the package rename?** The app is now `com.superdeepseek.app`,
+            > so it installs next to the old `com.betterdeepseek.app` instead of over it. Export your
+            > settings in the old app (Advanced settings → Integrations & backup → Export), import them
+            > here, then uninstall the old app. Details in the README.
+
+            <!-- bds-build-id: ${{ github.run_number }} -->
+          files: |
+            *.apk
+            *.sha256
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+ <<< "$APK_ENTRIES" || { echo "::error::APK is missing libproot.so"; exit 1; }
+          grep -Eq '^lib/[^/]+/libtalloc\.so
+        uses: actions/upload-artifact@v7
+        with:
+          name: super-deepseek-apk
+          path: |
+            *.apk
+            *.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  android-instrumented-tests:
+    name: Android Emulator Tests (API ${{ matrix.api-level }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # Keep the API 30/34/35 emulator coverage required by the stability plan.
+        api-level: [30, 34, 35]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle*
+            android/**/gradle-wrapper.properties
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools platforms;android-36 build-tools;36.0.0
+      - name: Write Android local.properties and stage engine
+        run: |
+          printf 'sdk.dir=%s\n' "$ANDROID_HOME" > android/local.properties
+          mkdir -p android/app/src/main/assets
+          rm -rf android/app/src/main/assets/bds
+          cp -r android/app/src/main/bds-assets/bds android/app/src/main/assets/bds
+          chmod +x android/gradlew
+      - name: Enable KVM for hardware-accelerated emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run Android instrumented tests on API ${{ matrix.api-level }}
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: bash -o pipefail -c 'cd android && ./gradlew --no-daemon connectedDebugAndroidTest --stacktrace --info 2>&1 | tee /tmp/android-instrumented.log'
+      - name: Annotate Android instrumentation failures
+        if: failure()
+        run: |
+          if [ -f /tmp/android-instrumented.log ]; then
+            grep -E 'FAILURES|Tests run:|FAILED|Exception|Assertion|Expected:|Actual:|INSTRUMENTATION_STATUS|Error in |Process:' /tmp/android-instrumented.log | tail -80 > /tmp/android-instrumented-failures.log || true
+            if [ -s /tmp/android-instrumented-failures.log ]; then
+              while IFS= read -r line; do echo "::error::$line"; done < /tmp/android-instrumented-failures.log
+            else
+              tail -40 /tmp/android-instrumented.log | while IFS= read -r line; do echo "::error::$line"; done
+            fi
+          else
+            echo '::error::Android instrumentation runner did not create /tmp/android-instrumented.log'
+          fi
+      - name: Summarize Android instrumentation result
+        if: always()
+        run: |
+          if [ -f /tmp/android-instrumented.log ]; then
+            {
+              echo '### Android instrumentation log (tail)'
+              echo '```text'
+              tail -180 /tmp/android-instrumented.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Android instrumentation log was not created.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload Android instrumentation reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-instrumented-test-reports
+          path: |
+            /tmp/android-instrumented.log
+            android/app/build/reports/androidTests/connected/**
+            android/app/build/outputs/androidTest-results/connected/**
+          if-no-files-found: ignore
+          retention-days: 14
+
+  lint:
+    # Diagnostics only: Android Lint and Kotlin compiler warnings, reported as
+    # annotations. Never blocks the build or the release.
+    name: Lint (report only)
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle*
+            android/**/gradle-wrapper.properties
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools platforms;android-36 build-tools;36.0.0
+      - name: Android Lint
+        working-directory: android
+        run: |
+          printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
+          chmod +x ./gradlew
+          ./gradlew --no-daemon lintDebug -Dorg.gradle.jvmargs=-Xmx3g 2>&1 | tee /tmp/gradle-lint.log || true
+          python3 ../scripts/ci_annotate_lint.py app/build/reports/lint-results-debug.xml /tmp/gradle-lint.log
+
+  release:
+    name: Publish Release
+    needs: [build-apk, android-instrumented-tests]
+    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.publish == true)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: super-deepseek-apk
+      - id: rel_cfg
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"; echo "title=Super DeepSeek v${VERSION}" >> "$GITHUB_OUTPUT"; else echo "tag=latest" >> "$GITHUB_OUTPUT"; echo "title=Super DeepSeek (Continuous Build #${{ github.run_number }})" >> "$GITHUB_OUTPUT"; fi
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.rel_cfg.outputs.tag }}
+          name: ${{ steps.rel_cfg.outputs.title }}
+          body: |
+            ### Super DeepSeek for Android
+
+            **Version:** `${{ steps.rel_cfg.outputs.version }}`
+            **Build:** `${{ github.run_number }}`
+            **Commit:** `${{ github.sha }}`
+
+            The official DeepSeek chat, supercharged: the Super DeepSeek engine runs on
+            top of chat.deepseek.com inside a native Android shell.
+
+            #### Highlights
+            - An AI agent with its own Linux (Alpine) that writes, runs and tests code until the task is done; Stop is always there
+            - Linux Studio: terminal, files and live preview
+            - Slash commands, snippets and a command palette
+            - Memory, personas, system prompts, skills and projects
+            - MCP servers, Deep Research, web fetch, code runners and file tools
+            - Export chats (Markdown, PDF, HTML, image), light and dark themes
+            - Native file / camera picker, downloads, haptics and in-app updates
+
+            Install on Android 8.0+ and sign in with your DeepSeek account.
+            Builds are signed with the same key, so each one installs as an update.
+
+            > **Coming from a build before the package rename?** The app is now `com.superdeepseek.app`,
+            > so it installs next to the old `com.betterdeepseek.app` instead of over it. Export your
+            > settings in the old app (Advanced settings → Integrations & backup → Export), import them
+            > here, then uninstall the old app. Details in the README.
+
+            <!-- bds-build-id: ${{ github.run_number }} -->
+          files: |
+            *.apk
+            *.sha256
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+ <<< "$APK_ENTRIES" || { echo "::error::APK is missing libtalloc.so"; exit 1; }
+
+          CERT_OUTPUT="$($ANDROID_HOME/build-tools/36.0.0/apksigner verify --verbose --print-certs "$APK_PATH")"
+          CERT_SHA256="$(printf '%s\n' "$CERT_OUTPUT" | awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $NF; exit}' | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          if [[ -z "$CERT_SHA256" || "$CERT_SHA256" != "$EXPECTED_CERT_SHA256" ]]; then
+            echo "::error::APK signer certificate does not match the pinned trusted release identity"
+            printf 'Expected signer SHA-256: %s\nActual signer SHA-256: %s\n' "$EXPECTED_CERT_SHA256" "${CERT_SHA256:-missing}"
+            exit 1
+          fi
+          echo "Release APK identity, versionCode, checksum, pinned signer, and Linux sandbox payload verified."
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v7
         with:

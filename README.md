@@ -216,7 +216,7 @@ design is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ```bash
 npm ci
 npm test                              # engine unit tests + compliance-harness self-test
-npm run genui:acceptance              # 15 Generative UI acceptance checks in Chromium (needs `npx playwright install chromium`)
+npm run genui:acceptance              # Chromium/Playwright acceptance checks (runner prints the current count)
 npm run android:stage-engine          # copy the engine into the APK assets
 python3 scripts/fetch_sandbox_deps.py # proot + libraries for the Linux sandbox (optional)
 cd android && ./gradlew testDebugUnitTest assembleRelease
@@ -224,7 +224,9 @@ cd android && ./gradlew testDebugUnitTest assembleRelease
 
 Without the sandbox step the app still builds and works, just without Linux.
 CI ([build-and-release-apk.yml](.github/workflows/build-and-release-apk.yml)) runs the same
-steps, verifies the APK signature and publishes releases:
+steps, validates the publishable APK identity/checksum/signature/sandbox payload, and publishes
+only after the required emulator matrix passes. See the [release-readiness checklist](docs/RELEASE-READINESS.md)
+for current evidence, device-only checks, known limitations, and safe log-redaction rules:
 
 - a push to `main` updates the *latest* build;
 - a `v*` tag creates a versioned release.
