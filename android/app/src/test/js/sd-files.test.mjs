@@ -10,10 +10,11 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SRC = fs.readFileSync(path.join(here, '../../main/bds-assets/bds/sd-files.js'), 'utf8');
 
-function load(accept) {
+function load(accept, options = {}) {
   const listeners = [];
   const win = {
     TextDecoder, Blob, File, Response, DecompressionStream, Uint8Array, Promise, console,
+    setTimeout: options.setTimeout || setTimeout,
     document: { documentElement: { lang: 'en' }, addEventListener: (t, f, c) => listeners.push([t, f, c]) },
     navigator: { language: 'en' },
     // Same contract as sd-native's acceptsFile: an empty list accepts everything.
@@ -157,6 +158,16 @@ test('zip bombs are stopped while inflating: the declared size is not trusted', 
   // A docx whose document.xml unpacks past the per-part cap fails cleanly instead of exhausting memory.
   const fat = zip({ 'word/document.xml': Buffer.alloc(33 * 1024 * 1024, 0x20) });
   await assert.rejects(F.extract(new File([fat], 'fat.docx')), /too large when unpacked/);
+});
+
+test('large binary summaries yield to the WebView event loop between scan chunks', async () => {
+  let yields = 0;
+  const { F } = load('.pdf', { setTimeout: (fn, delay) => { yields++; return setTimeout(fn, delay); } });
+  const bytes = Buffer.alloc(2 * 1024 * 1024);
+  const r = await F.extract(file(bytes, 'opaque.bin', 'application/octet-stream'));
+  assert.equal(r.kind, 'binary');
+  assert.match(r.text, /# Binary file: opaque\.bin/);
+  assert.ok(yields >= 7, `expected a timer yield per 256 KiB chunk, got ${yields}`);
 });
 
 test('very large text files: only the first 24 MB is read, with a note', async () => {

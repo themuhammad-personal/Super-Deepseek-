@@ -305,15 +305,24 @@
   }
   function binarySummary(bytes, file) {
     var head = Array.prototype.map.call(bytes.subarray(0, 32), function (x) { return ('0' + x.toString(16)).slice(-2); }).join(' ');
-    var strs = [], cur = '', total = 0;
-    for (var i = 0; i < bytes.length && total < 400000; i++) {
-      var c = bytes[i];
-      if (c >= 32 && c < 127) cur += String.fromCharCode(c);
-      else { if (cur.length >= 6) { strs.push(cur); total += cur.length; } cur = ''; }
+    var strs = [], cur = '', total = 0, i = 0, chunkSize = 256 * 1024;
+    function scanChunk() {
+      var end = Math.min(bytes.length, i + chunkSize);
+      for (; i < end && total < 400000; i++) {
+        var c = bytes[i];
+        if (c >= 32 && c < 127) cur += String.fromCharCode(c);
+        else { if (cur.length >= 6) { strs.push(cur); total += cur.length; } cur = ''; }
+      }
+      if (i < bytes.length && total < 400000) {
+        // This runs in the WebView main world. Yield between chunks so a large
+        // opaque upload cannot monopolize the chat UI while its strings are scanned.
+        return new Promise(function (resolve) { window.setTimeout(resolve, 0); }).then(scanChunk);
+      }
+      if (cur.length >= 6) strs.push(cur);
+      return ['# Binary file: ' + file.name, '', '- Size: ' + fmtSize(file.size), '- Type: ' + (file.type || 'unknown'), '- First bytes (hex): ' + head, '',
+        'This format cannot be read as text on the device. Below are the readable strings found inside it (like the `strings` tool).', '', '## Strings', strs.join('\n')].join('\n');
     }
-    if (cur.length >= 6) strs.push(cur);
-    return ['# Binary file: ' + file.name, '', '- Size: ' + fmtSize(file.size), '- Type: ' + (file.type || 'unknown'), '- First bytes (hex): ' + head, '',
-      'This format cannot be read as text on the device. Below are the readable strings found inside it (like the `strings` tool).', '', '## Strings', strs.join('\n')].join('\n');
+    return Promise.resolve().then(scanChunk);
   }
 
   /** file → { text, kind } describing the file in plain text. */
@@ -362,7 +371,7 @@
         if (/\.(x?html?|xht)$/i.test(file.name)) return { text: s, kind: 'web page' };
         return { text: s, kind: 'text' };
       }
-      return { text: binarySummary(b, file), kind: 'binary' };
+      return binarySummary(b, file).then(function (text) { return { text: text, kind: 'binary' }; });
     });
   }
 
