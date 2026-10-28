@@ -82,7 +82,7 @@ test('a visible CAPTCHA takes precedence over a chat-shaped page', () => {
   assert.equal(runProbe({
     challengeNodes: [element({ src: 'https://newassets.hcaptcha.com/captcha/v1/check' })],
     composerNodes: [element()],
-  }), 'auth');
+  }).surface, 'auth');
 });
 
 test('the real chat composer allows engine injection', () => {
