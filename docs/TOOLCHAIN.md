@@ -93,7 +93,19 @@ The report never blocks a build: an app that cannot be built cannot be fixed.
 
 ## Verification
 
-`npm test` (engine 206 + scripts self-test + compliance harness), then CI:
-`./gradlew testDebugUnitTest` (283 Robolectric tests), the Chromium acceptance
-suite, and `assembleRelease` with a signature check. None of it replaces five
-minutes on a real phone; see `docs/genui/TEST-GUIDE.bn.md`.
+`npm test` (engine tests + sandbox-dependency self-test + CI signing-policy tests +
+compliance harness), then CI: `./gradlew testDebugUnitTest` (283 Robolectric tests),
+the Chromium acceptance suite, `assembleRelease` with a signature check, and
+`connectedDebugAndroidTest` on an API 35 x86_64 emulator. Emulator coverage is
+not a substitute for five minutes on a real phone; see `docs/genui/TEST-GUIDE.bn.md`.
+
+## Release signing policy
+
+Publishable builds (`main`, `v*` tags, or workflow dispatch with `publish=true`)
+require the permanent keystore and all four Actions secrets:
+`BDS_KEYSTORE`, `BDS_KEYSTORE_PASSWORD`, `BDS_KEY_ALIAS`, and `BDS_KEY_PASSWORD`.
+If any are missing, CI fails closed instead of generating or using a fallback key.
+Pull-request and non-publishing manual builds use a temporary randomized key; their
+APK artifacts are for testing only and cannot update an installed release. Local
+builds remain possible without CI secrets. The policy is guarded by
+`scripts/ci-signing-policy.test.mjs`.

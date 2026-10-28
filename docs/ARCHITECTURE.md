@@ -220,8 +220,12 @@ The check never modifies the page beyond its own (tagged `data-sd-owned`) strip.
 - Generative UI acceptance: `npm run genui:acceptance` (20 checks, Playwright Chromium against
   `design-preview/genui.html` / `genui-csp.html` with a mocked bridge), run in CI; screenshots are
   uploaded as the `genui-acceptance` artifact.
-- CI (`.github/workflows/build-and-release-apk.yml`) builds and verifies a signed release
-  APK; failing unit-test reports are uploaded as a workflow artifact.
+- CI (`.github/workflows/build-and-release-apk.yml`) builds and verifies an APK on the
+  current `arena/**` work branches without publishing it, and publishes only for the
+  configured release refs. It runs `connectedDebugAndroidTest` on an API 35 x86_64
+  emulator for runtime-only cookie and edge-to-edge checks; failing unit-test reports
+  are uploaded as a workflow artifact. The emulator job does not replace real-device
+  verification.
 
 The APK's only web assets are the engine files staged from `android/app/src/main/bds-assets/bds`;
 the official site is the chat surface. (The earlier React SPA was removed in 2.50.)

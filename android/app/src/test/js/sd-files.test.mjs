@@ -10,12 +10,16 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SRC = fs.readFileSync(path.join(here, '../../main/bds-assets/bds/sd-files.js'), 'utf8');
 
-function load(accept) {
+function load(accept, options = {}) {
   const listeners = [];
   const win = {
-    TextDecoder, Blob, File, Response, DecompressionStream, Uint8Array, Promise, console,
-    document: { documentElement: { lang: 'en' }, addEventListener: (t, f, c) => listeners.push([t, f, c]) },
+    TextDecoder, Blob, File, Response, DecompressionStream, Uint8Array, Promise, Event,
+    FileReader: options.FileReader,
+    console: options.console || console,
+    setTimeout: options.setTimeout || setTimeout,
+    document: options.document || { documentElement: { lang: 'en' }, addEventListener: (t, f, c) => listeners.push([t, f, c]) },
     navigator: { language: 'en' },
+    __sdEngine: options.engine,
     // Same contract as sd-native's acceptsFile: an empty list accepts everything.
     __sdNative: { _acceptsFile: (acc, f) => { const l = (acc || '').split(',').map((s) => s.trim()).filter(Boolean); return !l.length || l.some((a) => f.name.toLowerCase().endsWith(a)); } },
   };
@@ -128,7 +132,14 @@ test('convertAll: accepted files untouched, refused ones converted, audio/video 
   const pdf = file(Buffer.from('%PDF-1.4'), 'paper.pdf', 'application/pdf');
   const odt = file(zip({ mimetype: 'x', 'content.xml': '<text:p>Hi</text:p>' }, true), 'note.odt');
   const mp4 = file(Buffer.from('....'), 'clip.mp4', 'video/mp4');
-  const r = await F.convertAll([pdf, odt, mp4], { accept: '.pdf,.txt' });
+  const progress = [];
+  const r = await F.convertAll([pdf, odt, mp4], { accept: '.pdf,.txt' }, { onProgress: (p) => progress.push([p.current, p.phase, p.completed]) });
+  assert.equal(r.cancelled, false);
+  assert.deepEqual(progress, [
+    ['paper.pdf', 'reading', 0], ['paper.pdf', 'ready', 1],
+    ['note.odt', 'reading', 1], ['note.odt', 'ready', 2],
+    ['clip.mp4', 'reading', 2], ['clip.mp4', 'ready', 3],
+  ]);
   assert.equal(r.files.length, 2);
   assert.equal(r.files[0], pdf);
   assert.equal(r.files[1].name, 'note.odt.txt');
@@ -137,9 +148,118 @@ test('convertAll: accepted files untouched, refused ones converted, audio/video 
   assert.ok(r.notes.some((n) => /note\.odt → read on device/.test(n)));
 });
 
+test('file preparation shows accessible localized progress and Stop aborts attachment', async () => {
+  class Element {
+    constructor(tag) {
+      this.tagName = tag.toUpperCase(); this.children = []; this.attributes = {}; this.listeners = {}; this.parentNode = null;
+      this.classList = { add() {}, remove() {} };
+    }
+    append(...nodes) { nodes.forEach((node) => this.appendChild(node)); }
+    appendChild(node) { this.children.push(node); node.parentNode = this; return node; }
+    removeChild(node) { this.children = this.children.filter((x) => x !== node); node.parentNode = null; }
+    setAttribute(name, value) { this.attributes[name] = String(value); }
+    addEventListener(name, fn) { this.listeners[name] = fn; }
+  }
+  const created = [], messages = [], listeners = [], readers = [];
+  class Reader {
+    readAsArrayBuffer(blob) { this.blob = blob; readers.push(this); }
+    abort() { this.aborted = true; if (this.onabort) this.onabort(); }
+  }
+  const body = new Element('body');
+  const document = {
+    body, documentElement: { lang: 'en' },
+    addEventListener: (t, f, c) => listeners.push([t, f, c]),
+    createElement: (tag) => { const el = new Element(tag); created.push(el); return el; },
+  };
+  load(undefined, {
+    document, FileReader: Reader, engine: { locale: () => 'bn-BD', toast: (m) => messages.push(m) },
+    console: { info: (...args) => messages.push(args.join(' ')), warn() {} },
+  });
+  const original = file(Buffer.from('placeholder'), 'notes.unsupported');
+  const dispatched = [];
+  const input = {
+    tagName: 'INPUT', type: 'file', multiple: true, accept: '.pdf', files: [original],
+    hasAttribute: () => false, closest: () => null,
+    dispatchEvent: (e) => { dispatched.push(e); return true; },
+  };
+  listeners[0][1]({ target: input, stopImmediatePropagation() {}, stopPropagation() {} });
+  await Promise.resolve();
+  assert.equal(readers.length, 1, 'the file read is cancellable while pending');
+  const card = created.find((e) => e.className === 'sd-files-progress');
+  assert.ok(card, 'the user gets a visible progress card');
+  assert.equal(card.attributes.role, 'status');
+  assert.equal(card.attributes['aria-live'], 'polite');
+  assert.match(card.children[1].children[0].textContent, /প্রস্তুত হচ্ছে 1 \/ 1/);
+  assert.equal(card.children[1].children[1].textContent, 'notes.unsupported');
+  assert.equal(card.children[1].children[2].value, 0);
+  assert.equal(card.children[2].textContent, 'থামান');
+  card.children[2].listeners.click();
+  assert.equal(card.parentNode, null, 'Stop immediately dismisses progress');
+  assert.equal(readers[0].aborted, true, 'Stop aborts the underlying file read');
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.deepEqual(input.files, [original]);
+  assert.equal(dispatched.length, 0, 'cancelled files are never handed to the chat');
+  assert.match(messages.join(' '), /থামানো হয়েছে। কোনো ফাইল যুক্ত হয়নি/);
+});
+
+test('failed DataTransfer setup keeps and replays the user’s original file selection', async () => {
+  const logs = [];
+  const { listeners } = load(undefined, { console: { info: (...args) => logs.push(args.join(' ')), warn: (...args) => logs.push(args.join(' ')) } });
+  const original = file(Buffer.from('hello world'), 'notes.unsupported');
+  const dispatched = [];
+  const input = {
+    tagName: 'INPUT', type: 'file', multiple: true, accept: '.pdf', files: [original],
+    hasAttribute: () => false, closest: () => null,
+    dispatchEvent: (e) => { dispatched.push(e); return true; },
+  };
+  listeners[0][1]({ target: input, stopImmediatePropagation() {}, stopPropagation() {} });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.deepEqual(input.files, [original], 'the selection was not overwritten');
+  assert.equal(dispatched.length, 1, 'the page receives a replacement change event');
+  assert.equal(dispatched[0].type, 'change');
+  assert.match(logs.join(' '), /original selection was kept/);
+});
+
+test('a newer selection invalidates an older asynchronous conversion', async () => {
+  const { listeners } = load(undefined, { console: { info() {}, warn() {} } });
+  let finishRead, readStarted = false;
+  const older = file(Buffer.from('placeholder'), 'older.unsupported');
+  older.arrayBuffer = () => { readStarted = true; return new Promise((resolve) => { finishRead = resolve; }); };
+  const newer = file(Buffer.from('%PDF-1.4'), 'newer.pdf', 'application/pdf');
+  const dispatched = [];
+  const input = {
+    tagName: 'INPUT', type: 'file', multiple: true, accept: '.pdf', files: [older],
+    hasAttribute: () => false, closest: () => null,
+    dispatchEvent: (e) => { dispatched.push(e); return true; },
+  };
+  let firstStopped = false;
+  listeners[0][1]({ target: input, stopImmediatePropagation() { firstStopped = true; }, stopPropagation() {} });
+  await Promise.resolve();
+  assert.equal(readStarted, true, 'the first file read is pending');
+  assert.equal(firstStopped, true);
+  input.files = [newer];
+  let secondStopped = false;
+  listeners[0][1]({ target: input, stopImmediatePropagation() { secondStopped = true; }, stopPropagation() {} });
+  assert.equal(secondStopped, false, 'the accepted newer selection continues to the page');
+  finishRead(new Uint8Array(Buffer.from('older contents')).buffer);
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.deepEqual(input.files, [newer], 'the stale conversion cannot overwrite a newer selection');
+  assert.equal(dispatched.length, 0, 'the stale conversion is not replayed');
+});
+
 test('a capture-phase change listener is installed on the document', () => {
   const { listeners } = load();
   assert.ok(listeners.some(([type, , capture]) => type === 'change' && capture === true));
+});
+
+test('Office/EPUB XML members share one bounded unpacked-byte budget', async () => {
+  const { F } = load('.pdf');
+  const entry = Buffer.alloc(1024 * 1024);
+  const archive = zip({ 'part-a.xml': entry, 'part-b.xml': entry });
+  const entries = F._zipEntries(archive);
+  const full = await F._zipReadMany(archive, entries, 2 * entry.length);
+  assert.equal(full.bytes, 2 * entry.length);
+  await assert.rejects(F._zipReadMany(archive, entries, entry.length + entry.length / 2), /too large when unpacked/);
 });
 
 test('zip bombs are stopped while inflating: the declared size is not trusted', async () => {
@@ -157,6 +277,31 @@ test('zip bombs are stopped while inflating: the declared size is not trusted', 
   // A docx whose document.xml unpacks past the per-part cap fails cleanly instead of exhausting memory.
   const fat = zip({ 'word/document.xml': Buffer.alloc(33 * 1024 * 1024, 0x20) });
   await assert.rejects(F.extract(new File([fat], 'fat.docx')), /too large when unpacked/);
+});
+
+test('Stop signal cancels an in-flight ZIP inflation reader', async () => {
+  const { F } = load();
+  const archive = zip({ 'large.xml': Buffer.alloc(8 * 1024 * 1024) });
+  const entries = F._zipEntries(archive);
+  let cancelled = false;
+  const subscribers = [];
+  const signal = () => cancelled;
+  signal.subscribe = (fn) => { subscribers.push(fn); return () => {}; };
+  const pending = F._zipReadMany(archive, entries, 16 * 1024 * 1024, signal);
+  await Promise.resolve();
+  cancelled = true;
+  subscribers.forEach((fn) => fn());
+  await assert.rejects(pending, /cancelled/);
+});
+
+test('large binary summaries yield to the WebView event loop between scan chunks', async () => {
+  let yields = 0;
+  const { F } = load('.pdf', { setTimeout: (fn, delay) => { yields++; return setTimeout(fn, delay); } });
+  const bytes = Buffer.alloc(2 * 1024 * 1024);
+  const r = await F.extract(file(bytes, 'opaque.bin', 'application/octet-stream'));
+  assert.equal(r.kind, 'binary');
+  assert.match(r.text, /# Binary file: opaque\.bin/);
+  assert.ok(yields >= 7, `expected a timer yield per 256 KiB chunk, got ${yields}`);
 });
 
 test('very large text files: only the first 24 MB is read, with a note', async () => {

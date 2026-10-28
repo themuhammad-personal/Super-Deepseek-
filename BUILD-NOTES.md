@@ -14,14 +14,19 @@ versionCode step — see `repo-consistency.test.mjs`.
 5. `python3 scripts/fetch_sandbox_deps.py` — optional Linux sandbox runtime
 6. `cd android && ./gradlew testDebugUnitTest` then `./gradlew assembleRelease` (separately on machines with ≤ 2 GB RAM)
 
-Signing: the release key is **not** in the repository (`*.jks` is git-ignored). CI decodes it
-from the `BDS_KEYSTORE` Actions secret (base64 of `superdeepseek-release.jks`) and reads
-`BDS_KEYSTORE_PASSWORD` / `BDS_KEY_ALIAS` / `BDS_KEY_PASSWORD`. All builds since 2.50 use this key,
-so each one installs over the previous one. For a local release build, put the key at
-`android/app/superdeepseek-release.jks`. Without the secret or the file, CI generates a throwaway
-key and that APK will **not** update an installed app.
-To set the secret: Settings → Secrets and variables → Actions → New repository secret,
-value = output of `base64 -w0 superdeepseek-release.jks`.
+Signing: the permanent release key is **not** in the repository (`*.jks` is git-ignored).
+Publishable builds on `main`, `v*` tags, and workflow dispatch with `publish=true` require all
+four Actions secrets: `BDS_KEYSTORE` (base64 of `superdeepseek-release.jks`),
+`BDS_KEYSTORE_PASSWORD`, `BDS_KEY_ALIAS`, and `BDS_KEY_PASSWORD`. If any is missing, the release
+build fails rather than publishing an APK signed with a different key. All user-facing releases
+must use the same permanent identity so they update installed copies.
+
+Pull-request and manual non-publishing checks use a newly generated, short-lived signing key;
+those APK artifacts are test-only and will **not** update an installed app. CI explicitly refuses
+to fall back to a debug or hard-coded key for a release. For local builds, put the release key at
+`android/app/superdeepseek-release.jks`; local-only builds without it may use the debug identity.
+To configure Actions, add each secret under Settings → Secrets and variables → Actions. Set
+`BDS_KEYSTORE` to the output of `base64 -w0 superdeepseek-release.jks`.
 
 Low-memory machines (2 GB): tests with `./gradlew --no-daemon --max-workers=1 "-Dorg.gradle.jvmargs=-Xmx448m -XX:MaxMetaspaceSize=256m -XX:+UseSerialGC" -Pkotlin.compiler.execution.strategy=in-process -PtestMaxHeap=560m testDebugUnitTest`; release alone with `-Xmx760m`. `GRADLE_OPTS` does not size the build daemon — use `-Dorg.gradle.jvmargs`.
 

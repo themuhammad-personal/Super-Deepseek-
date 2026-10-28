@@ -19,16 +19,17 @@ Read "Not verified" before relying on anything here.
 | Toolchain | AGP 8.5.2 → 8.13.2, Gradle 8.7 → 8.13, Kotlin 1.9.24 → 2.3.21, compileSdk/targetSdk 34 → 36, build-tools 36.0.0, Robolectric 4.13 → 4.17. androidx on the newest lines that still build on SDK 36 (`androidx.webkit` 1.11.0 → 1.14.0). |
 | 16 KB page sizes | `fetch_sandbox_deps.py` measures `p_align` of every shipped library and reports per-ABI readiness; CI annotates each library that is still 4 KB aligned. It never blocks a build. |
 | Release identity | `repo-consistency.test.mjs` (new): `package.json` ↔ `versionName`, the `versionCode` ladder, the engine module list vs the bundle, and the version named in the build docs. |
+| File-preparation safety | Accessible English/Bengali progress and Stop; active reads/inflation abort, partial results are discarded, newer selections supersede stale work, and setup failures replay the original selection. |
+| Android stability CI | Instrumented coverage now runs on API 30, 34, and 35. Edge-to-edge checks verify window configuration and contrast-scrim policy; inset-padding behavior has deterministic coverage in `KeyboardInsetTest` (avoiding timing-sensitive reads from an emulator window surface). Failure excerpts are surfaced in Actions annotations. |
 
-Test counts on this commit: engine **206**, Kotlin/Robolectric **283**,
-Chromium acceptance **20**, sandbox-deps ELF self-test **1**.
+**Latest full feature verification:** Actions run [40692288593](https://github.com/themuhammad-personal/Super-Deepseek-/actions/runs/40692288593), commit `9f77717`, succeeded: Node/engine and compliance-harness tests, Chromium GenUI acceptance, Kotlin/Robolectric tests, release APK build/signature checks, and instrumented emulator tests on API 30/34/35. Lint is report-only; release publishing was skipped.
 
 ## What changed in 2.70.1 (full review of 2.70.0)
 
 | Area | Bug found | Fix |
 |---|---|---|
 | Updater | The stable channel never offered an update: the continuous release is tagged `latest`, so no version could be read from the tag. | The version is read from the release notes (`**Version:**` line), never the title; tested against the real release. Repository pointer → `Super-Deepseek-`. |
-| Uploads | A zip bomb (forged sizes) could unpack without limit and exhaust the WebView's memory. | Inflate streams with a hard cap (4 MB per archive entry, 32 MB per document part). |
+| Uploads | A zip bomb (forged sizes) could unpack without limit and exhaust the WebView's memory. Multiple Office/EPUB parts could also inflate in parallel beyond the per-part cap. | Inflate streams with hard caps (4 MB per generic archive entry, 32 MB per Office/EPUB part, 48 MB total per container), serially for multi-part documents. |
 | Uploads | A 100 MB text file was decoded in full (~200 MB string). | Non-archives are read up to 24 MB, with a note. |
 | Uploads | UTF-16 files (Windows Notepad) were treated as binary. | Byte-order mark detected, decoded as text. |
 | Uploads | With no `accept` list on the chat input nothing was converted, so odt/epub/rtf/zip reached DeepSeek as is. | DeepSeek's documented formats are assumed for the chat input only. |
@@ -51,19 +52,21 @@ Every behaviour fix has a test that fails on the old code (JS 159 in total, Kotl
 | Errors showed raw code | **Lenient parser** (headers without `---`, missing/odd kind inferred, slugged ids, titles from `<title>`/`#`, repaired JSON envelopes). Only unrecoverable bodies fail, and they show a quiet error card (**Show code** / **Ask to fix**), never raw code. |
 | MCP viewer ≤ 20 %: quran.ai connected but its reader did not show | Real-server compatibility: 8 MB resources (was 160 KB), robust streamable-HTTP/SSE parser (`McpSse.kt`), `_meta.ui.resourceUri` on results, OpenAI Apps SDK templates (`openai/outputTemplate`, `text/html+skybridge`, `window.openai`), app-only tools hidden from the model and auto-allowed (unless destructive), views restored on reload. Live: quran.ai reader, Excalidraw, MCP playground all render. |
 | No web access from visuals | `fetch()` / `sdFetch()` / `sdImage()` in visuals and artifacts, **consent once per website**, no cookies, private networks always blocked (JS + native DNS + every redirect hop). |
-| Uploads limited | `sd-files.js`: every file type except audio/video. Accepted files go to DeepSeek unchanged; refused ones are converted to text on the device (OpenDocument, EPUB, RTF, Office, archives, unknown text, binary summary); huge text is split into noted parts. Streamed native picks up to 100 MB. |
+| Upload formats and limits | `sd-files.js`: accepted files go to DeepSeek unchanged; refused ones are converted to text on-device (Office/OpenDocument, EPUB, RTF, archives, unknown text, binary summary); huge text is split into noted parts; audio/video are refused. Input limit 100 MB. |
+| Upload preparation | `sd-files.js`: conversion has accessible, app-language progress and a Stop control; Stop aborts active `FileReader` and ZIP inflation, rejects partial attachment, and newer selections supersede stale work. Setup failures replay the original selection with an explicit message. |
 | Cards not premium | New design layer: artifact card (kind-tinted tile, 16 px radius, quiet elevation), skeletons, error card, consent sheet, MCP header, viewer, sds-ui widgets — plus the content.js todo / question & info / chart / file cards and the + sheet / settings icon tiles, restyled with page theme tokens only (light + dark). |
 
 ## Verified (evidence you can re-run)
 
 | Gate | Result | Command |
 |---|---|---|
-| Engine unit + contract tests | **149 / 149 pass** (incl. 9 new `sd-files` tests on real ZIP/docx/xlsx/pptx/odt/epub/rtf bytes) | `npm run test:engine` |
+| Engine unit + contract tests | **218 / 218 pass**; includes file preparation, archive limits, cancellation, recovery, and GenUI protocol coverage | `npm run test:engine` |
 | Compliance harness self-test | pass (synthetic fixtures only — not model compliance) | `npm run test:compliance-harness` |
-| Generative UI acceptance (Chromium, 390×844 light + 1280×900 dark, strict-CSP fixture) | **21 / 21 checks pass**, zero page errors | `npm run genui:acceptance` |
-| Live MCP App, `https://mcp.quran.ai` `interactive_study {"surah":1}` | **pass**: 17 model-visible tools, resource `ui://interactive_study_v450.html` (2.3 M chars) read, reader rendered inline (Sūrat al-Fātiḥah), app-only tools called without consent prompts | `npm run genui:mcp-live -- https://mcp.quran.ai interactive_study '{"surah":1}'` |
-| Kotlin unit tests (Robolectric) | **279 / 279 pass** (incl. new `FrameFetchPolicyTest` 5, `McpSseTest`) | `./gradlew testDebugUnitTest` |
-| Release APK | see *Release* below | `./gradlew assembleRelease` |
+| Generative UI acceptance (Chromium, 390×844 light + 1280×900 dark, strict-CSP fixture) | **21 / 21 checks pass**, zero page errors in latest Actions run | `npm run genui:acceptance` |
+| Android emulator instrumentation | pass on **API 30, 34, and 35** (cookies, edge-to-edge, and system-bar behavior) | `./gradlew connectedDebugAndroidTest` in the Actions API matrix |
+| Kotlin unit tests (Robolectric) | pass in the latest Actions run | `./gradlew testDebugUnitTest` |
+| Release APK | build and signature verification pass; publishing skipped | `./gradlew assembleRelease` |
+| Live MCP App, `https://mcp.quran.ai` `interactive_study {"surah":1}` | **Previously verified**: 17 model-visible tools, resource `ui://interactive_study_v450.html` (2.3 M chars) read, reader rendered inline (Sūrat al-Fātiḥah), app-only tools called without consent prompts. Not rerun in this sandbox. | `npm run genui:mcp-live -- https://mcp.quran.ai interactive_study '{"surah":1}'` |
 
 New acceptance checks in 2.70 (`scripts/genui-browser-check.mjs`, screenshots
 in `qa/genui/`):

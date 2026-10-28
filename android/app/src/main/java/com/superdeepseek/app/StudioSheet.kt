@@ -8,8 +8,10 @@ import android.app.Dialog
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.VelocityTracker
 import android.view.View
@@ -19,6 +21,8 @@ import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.PathInterpolator
 import android.widget.FrameLayout
+import android.window.OnBackInvokedCallback
+import android.window.OnBackInvokedDispatcher
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -42,10 +46,8 @@ internal class StudioSheet(
     private val density = activity.resources.displayMetrics.density
     private fun dp(v: Float): Int = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, activity.resources.displayMetrics).toInt()
 
-    private val dialog = object : Dialog(activity, android.R.style.Theme_Translucent_NoTitleBar) {
-        @Deprecated("Back slides the sheet away")
-        override fun onBackPressed() { this@StudioSheet.dismiss(animated = true) }
-    }
+    private val dialog = Dialog(activity, android.R.style.Theme_Translucent_NoTitleBar)
+    private var backInvokedCallback: OnBackInvokedCallback? = null
 
     private val root = FrameLayout(activity)
     private val scrim = View(activity).apply {
@@ -104,7 +106,14 @@ internal class StudioSheet(
             insets
         }
         dialog.setContentView(root)
-        dialog.setOnDismissListener { onDismissed?.invoke() }
+        installBackHandling()
+        dialog.setOnDismissListener {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                backInvokedCallback?.let(dialog.onBackInvokedDispatcher::unregisterOnBackInvokedCallback)
+                backInvokedCallback = null
+            }
+            onDismissed?.invoke()
+        }
         dialog.window?.let { w ->
             w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             w.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
@@ -121,6 +130,29 @@ internal class StudioSheet(
                     flags = flags or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
                 }
                 w.decorView.systemUiVisibility = flags
+            }
+        }
+    }
+
+    private fun installBackHandling() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val callback = OnBackInvokedCallback { dismiss(animated = true) }
+            dialog.onBackInvokedDispatcher.registerOnBackInvokedCallback(
+                OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+                callback,
+            )
+            backInvokedCallback = callback
+        } else {
+            // Before Android 13, Back is delivered as a key event. Keep the old
+            // sheet animation without overriding Dialog.onBackPressed(), which no
+            // longer receives predictive-back gestures on current Android.
+            dialog.setOnKeyListener { _, keyCode, event ->
+                if (keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
+                    dismiss(animated = true)
+                    true
+                } else {
+                    false
+                }
             }
         }
     }

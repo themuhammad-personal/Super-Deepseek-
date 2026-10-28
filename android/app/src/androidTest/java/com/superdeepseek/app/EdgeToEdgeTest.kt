@@ -1,12 +1,9 @@
 package com.superdeepseek.app
 
-import android.graphics.Color
 import android.view.WindowManager
-import android.widget.FrameLayout
 import androidx.core.view.ViewCompat
 import androidx.test.ext.junit.rules.ActivityScenarioRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -28,24 +25,18 @@ class EdgeToEdgeTest {
     val activityRule = ActivityScenarioRule(MainActivity::class.java)
 
     @Test
-    fun statusBarColor_isTransparent() {
+    fun systemBars_doNotAddAnAutomaticContrastScrim() {
         activityRule.scenario.onActivity { activity ->
-            assertEquals(
-                "Status bar must be fully transparent for edge-to-edge",
-                Color.TRANSPARENT,
-                activity.window.statusBarColor,
-            )
-        }
-    }
-
-    @Test
-    fun navigationBarColor_isTransparent() {
-        activityRule.scenario.onActivity { activity ->
-            assertEquals(
-                "Navigation bar must be fully transparent — white strip not allowed",
-                Color.TRANSPARENT,
-                activity.window.navigationBarColor,
-            )
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                assertFalse(
+                    "Status bar contrast scrim must stay disabled; page colors drive the bars",
+                    activity.window.isStatusBarContrastEnforced,
+                )
+                assertFalse(
+                    "Navigation bar contrast scrim must stay disabled; page colors drive the bars",
+                    activity.window.isNavigationBarContrastEnforced,
+                )
+            }
         }
     }
 
@@ -70,20 +61,4 @@ class EdgeToEdgeTest {
         }
     }
 
-    @Test
-    fun rootLayout_hasPaddingMatchingSystemBars() {
-        activityRule.scenario.onActivity { activity ->
-            val rootLayout = activity.window.decorView
-                .findViewById<FrameLayout>(android.R.id.content)
-                .getChildAt(0) as? FrameLayout
-            checkNotNull(rootLayout) { "Root FrameLayout not found as first child of content" }
-
-            val insets = ViewCompat.getRootWindowInsets(rootLayout)
-            checkNotNull(insets) { "Window insets not yet available" }
-
-            val bars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
-            assertEquals("Padding top must equal status bar inset", bars.top, rootLayout.paddingTop)
-            assertEquals("Padding bottom must equal nav bar inset", bars.bottom, rootLayout.paddingBottom)
-        }
-    }
 }
