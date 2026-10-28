@@ -133,6 +133,11 @@ test('raw call spans support name= and preserve prose around a call', () => {
         this.childNodes[i] = next; next.parentNode = this; old.parentNode = null; return old;
       },
       insertBefore(next, ref) {
+        // Match DOM semantics: moving a node detaches it from its old parent.
+        if (next.parentNode && Array.isArray(next.parentNode.childNodes)) {
+          const oldIndex = next.parentNode.childNodes.indexOf(next);
+          if (oldIndex >= 0) next.parentNode.childNodes.splice(oldIndex, 1);
+        }
         const i = this.childNodes.indexOf(ref);
         if (i < 0) throw new Error('reference child not found');
         this.childNodes.splice(i, 0, next); next.parentNode = this; return next;
