@@ -172,6 +172,18 @@ try {
     await ctx.close();
   });
 
+  await test('02b JSON envelope honors explicit inline presentation instead of opening an artifact card', async () => {
+    const { ctx, page, errors } = await fresh();
+    await page.evaluate(() => { const md = fx.message(); fx.classic(md, 'sds-genui', JSON.stringify({ version: 1, id: 'inline-moon', kind: 'svg', title: 'Inline Moon', presentation: 'inline', payload: { svg: '<svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="gold"/></svg>' } })); });
+    const inline = page.locator('.sd-inline[data-kind="svg"]');
+    await inline.waitFor({ timeout: 5000 });
+    assert.equal(await page.locator('.sd-art').count(), 0, 'explicit inline content is not stored as a card');
+    await page.frameLocator('.sd-inline iframe').locator('circle').waitFor({ timeout: 5000 });
+    assert.deepEqual(errors, []);
+    await shot(page, '02b-json-inline-presentation.png');
+    await ctx.close();
+  });
+
   await test('03 streaming: card shows "Generating…", viewer streams code, then exactly one card and live preview', async () => {
     const { ctx, page, errors } = await fresh();
     await page.evaluate(() => { window.__md = fx.message(); window.__pre = fx.block(window.__md, 'sds-genui', ''); });
