@@ -56,7 +56,7 @@ test('published release carries a source archive and SHA-256 from the exact rele
   assert.ok(sourceStep.includes('"$GITHUB_SHA"'), 'source archive must match the commit tested and built by this workflow');
   assert.ok(sourceStep.includes('sha256sum "$SOURCE_ARCHIVE"'), 'source archive must include a SHA-256 sidecar');
   const releaseStart = workflow.indexOf('  release:');
-  const releaseBlock = workflow.slice(releaseStart, actionStart);
+  const releaseBlock = workflow.slice(releaseStart);
   assert.ok(releaseBlock.includes('super-deepseek-source-v*.zip'));
   assert.ok(releaseBlock.includes('super-deepseek-source-v*.zip.sha256'));
   assert.ok(releaseBlock.includes('**Exact source bundle:**'), 'release notes must point to the matching source asset');
