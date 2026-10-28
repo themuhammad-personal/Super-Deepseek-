@@ -100,6 +100,165 @@
 
   function isSandbox(url) { return /^sandbox/i.test(String(url || '')); }
 
+  /** Parse only real attribute names; text inside quoted values is never an attribute. */
+  function hasToolAttribute(attrs) {
+    var s = String(attrs || '');
+    var i = 0;
+    while (i < s.length) {
+      while (i < s.length && /[\s/]/.test(s[i])) i++;
+      var keyStart = i;
+      while (i < s.length && /[A-Za-z0-9_:-]/.test(s[i])) i++;
+      if (i === keyStart) { i++; continue; }
+      var key = s.slice(keyStart, i).toLowerCase();
+      while (i < s.length && /\s/.test(s[i])) i++;
+      if (s[i] !== '=') {
+        if (i < s.length) i++;
+        continue;
+      }
+      i++;
+      while (i < s.length && /\s/.test(s[i])) i++;
+      if (i >= s.length) break;
+      var q = s[i];
+      if (q === '"' || q === "'") {
+        i++;
+        while (i < s.length && s[i] !== q) i++;
+        if (i < s.length) i++;
+      } else {
+        while (i < s.length && !/[\s/]/.test(s[i])) i++;
+      }
+      if (key === 'tool' || key === 'toolname' || key === 'name') return true;
+    }
+    return false;
+  }
+
+  function readMcpOpen(s, start, prefixLength) {
+    var i = start + prefixLength;
+    var quote = null;
+    for (; i < s.length; i++) {
+      var c = s[i];
+      if (quote) { if (c === quote) quote = null; }
+      else if (c === '"' || c === "'") quote = c;
+      else if (c === '>') break;
+    }
+    if (i >= s.length) return null;
+    var attrs = s.slice(start + prefixLength, i);
+    return {
+      start: start,
+      tagEnd: i,
+      end: i + 1,
+      attrs: attrs,
+      valid: hasToolAttribute(attrs),
+      selfClosing: /\/\s*$/.test(attrs)
+    };
+  }
+
+  function findNextMcpOpen(s, from) {
+    var re = /<[BS]DS:(?:AUTO:)?MCP\b/gi;
+    re.lastIndex = from;
+    var m;
+    while ((m = re.exec(s))) {
+      var open = readMcpOpen(s, m.index, m[0].length);
+      if (!open) return null;
+      if (open.valid) return open;
+      re.lastIndex = open.end;
+    }
+    return null;
+  }
+
+  /**
+   * Scan a body for its first real close or a later call opener. Tool bodies are
+   * JSON, so delimiter-looking text inside double-quoted JSON strings is data,
+   * not a tag boundary. Escape sequences are respected.
+   */
+  function findMcpBoundary(s, from) {
+    var inString = false;
+    var escaped = false;
+    var close = /<\/[BS]DS:(?:AUTO:)?MCP\s*>/gi;
+    var open = /<[BS]DS:(?:AUTO:)?MCP\b/gi;
+    for (var i = from; i < s.length; i++) {
+      var c = s[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (c === '\\') escaped = true;
+        else if (c === '"') inString = false;
+        continue;
+      }
+      if (c === '"') { inString = true; continue; }
+      if (c !== '<') continue;
+      close.lastIndex = i;
+      var cm = close.exec(s);
+      if (cm && cm.index === i) return { type: 'close', start: i, end: i + cm[0].length };
+      open.lastIndex = i;
+      var om = open.exec(s);
+      if (om && om.index === i) {
+        var next = readMcpOpen(s, i, om[0].length);
+        if (!next) return null;
+        if (next.valid) return { type: 'next', start: i, end: next.end };
+        i = next.end - 1;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Find real MCP call spans. A streamed call without a close consumes its current
+   * body, but stops before the next valid call opener so calls remain independent.
+   * Attribute names inside quoted values are ignored.
+   */
+  function findRawCallSpans(text) {
+    var s = String(text || '');
+    var re = /<[BS]DS:(?:AUTO:)?MCP\b/gi;
+    var spans = [];
+    var m;
+    while ((m = re.exec(s))) {
+      var open = readMcpOpen(s, m.index, m[0].length);
+      if (!open) break;
+      if (!open.valid) {
+        re.lastIndex = open.end;
+        continue;
+      }
+      var end = open.end;
+      if (!open.selfClosing) {
+        var boundary = findMcpBoundary(s, open.end);
+        if (boundary && boundary.type === 'close') end = boundary.end;
+        else if (boundary && boundary.type === 'next') end = boundary.start;
+        else end = s.length;
+      }
+      spans.push({ start: open.start, end: end });
+      re.lastIndex = end;
+    }
+    return spans;
+  }
+
+  function rawCallCount(text) { return findRawCallSpans(text).length; }
+
+  function isProtocolResultText(text) {
+    var tx = String(text || '').trim();
+    return /^<(?:SuperDeepSeek|BetterDeepSeek)>\s*[\s\S]*?\[(?:SDS|BDS):AUTO_MCP_(RESULT|ERROR)\][\s\S]*?\[\/(?:SDS|BDS):AUTO_MCP_\1\]\s*<\/(?:SuperDeepSeek|BetterDeepSeek)>$/i.test(tx);
+  }
+
+  function isAutoUserText(text, role) {
+    var tx = String(text || '').trim();
+    var r = String(role || '').toLowerCase();
+    // Assistant replies are auto protocol traffic only when the whole message
+    // is the structured result/error envelope, not because it quotes a marker.
+    if (r === 'assistant') return isProtocolResultText(tx);
+    if (r !== 'user') return false;
+    return isProtocolResultText(tx) ||
+      /^\[[BS]DS:AUTO(?:\s|\]|_)/i.test(tx) ||
+      /\bmcp_results?(?:_[A-Za-z0-9_.-]+)?\.txt\b/i.test(tx);
+  }
+
+  /** Normalise protocol messages before grouping, independent of DOM role selectors. */
+  function classifyMessage(role, text, loadingCalls, forceAuto) {
+    var auto = !!forceAuto || isAutoUserText(text, role);
+    if (auto) role = 'user';
+    var calls = role === 'assistant'
+      ? Math.max(Number(loadingCalls) || 0, rawCallCount(text))
+      : 0;
+    return { role: role, auto: auto, calls: calls };
+  }
+
   function serverLabel(url) {
     if (!url || isSandbox(url)) return t('Linux sandbox', 'লিনাক্স স্যান্ডবক্স');
     var m = String(url).match(/^[a-z]+:\/\/([^/?#]+)/i);
@@ -325,6 +484,39 @@
     return r ? String(r).toLowerCase() : 'assistant';
   }
 
+  /**
+   * Read text for protocol detection while ignoring rendered code examples and
+   * our own activity UI. Hidden raw-call spans remain part of the source text.
+   */
+  function collectTextEntries(root, out, hiddenParent) {
+    if (!root) return;
+    if (root.nodeType === 3) {
+      if (root.nodeValue) out.push({ node: root, hidden: hiddenParent || null });
+      return;
+    }
+    if (root.nodeType !== 1) return;
+    var tag = String(root.tagName || '').toUpperCase();
+    if (tag === 'PRE' || tag === 'CODE' || tag === 'SCRIPT' || tag === 'STYLE') return;
+    if (root.id === 'sd-run-sheet' ||
+        (root.classList && (
+          root.classList.contains('sd-run-card') ||
+          root.classList.contains('bds-mcp-loading') ||
+          root.classList.contains('bds-mcp-result-card') ||
+          root.classList.contains('bds-mcp-error-card')
+        ))) return;
+    var hidden = root.hasAttribute && root.hasAttribute('data-sd-run-raw-hidden') ? root : hiddenParent;
+    var children = root.childNodes;
+    if (!children || !children.length) return;
+    for (var i = 0; i < children.length; i++) collectTextEntries(children[i], out, hidden);
+  }
+
+  function protocolText(root) {
+    var entries = [];
+    collectTextEntries(root, entries, null);
+    // Empty means only excluded code/examples; never classify those through textContent.
+    return entries.map(function (e) { return e.node.nodeValue || ''; }).join('');
+  }
+
   function visibleText(el) {
     var parts = el.querySelectorAll('.fbb737a4, .ds-markdown, .ds-collapsible-text');
     var s = '';
@@ -333,11 +525,10 @@
   }
 
   /** An automatic message of the engine (tool results, an agent nudge). */
-  function isAutoUser(el) {
+  function isAutoUser(el, role, text) {
+    role = role || roleOf(el);
     if (el.querySelector('.bds-mcp-result-card, .bds-mcp-error-card')) return true;
-    var tx = el.textContent || '';
-    if (AUTO_RE.test(tx) || /SDS:AUTO_MCP|<\/?SuperDeepSeek>/.test(tx)) return true;
-    if (/\bmcp_results?(?:_[A-Za-z0-9_.-]+)?\.txt\b/.test(tx)) return true;
+    if (isAutoUserText(text == null ? protocolText(el) : text, role)) return true;
     // A nudge is wiped by the engine's sanitiser, leaving nothing visible.
     return !!el.querySelector('.bds-hidden-message') && !visibleText(el);
   }
@@ -364,6 +555,71 @@
     return row;
   }
 
+  /**
+   * Hide exact raw-call text spans, not whole paragraphs. This preserves adjacent
+   * prose, fenced code examples, and calls whose tag is split between text nodes.
+   * The selected text stays in reversible span wrappers in the original DOM.
+   */
+  var hiddenRawNodes = new Set();
+
+  function restoreHiddenRawNode(node) {
+    if (!node) return;
+    if (node.removeAttribute) node.removeAttribute('data-sd-run-raw-hidden');
+    var parent = node.parentNode;
+    if (!parent || String(node.tagName || '').toUpperCase() !== 'SPAN') return;
+    while (node.firstChild) parent.insertBefore(node.firstChild, node);
+    parent.removeChild(node);
+  }
+
+  function hideRawCallBlocks(host, nextHidden) {
+    if (!host || !host.querySelectorAll) return;
+    var entries = [];
+    collectTextEntries(host, entries, null);
+    if (!entries.length) return;
+
+    var full = '';
+    entries.forEach(function (entry) {
+      entry.start = full.length;
+      full += entry.node.nodeValue || '';
+      entry.end = full.length;
+    });
+    var calls = findRawCallSpans(full);
+    if (!calls.length) return;
+
+    var operations = [];
+    calls.forEach(function (call) {
+      entries.forEach(function (entry) {
+        var start = Math.max(call.start, entry.start);
+        var end = Math.min(call.end, entry.end);
+        if (end <= start) return;
+        if (entry.hidden) nextHidden.add(entry.hidden);
+        else operations.push({
+          node: entry.node,
+          start: start - entry.start,
+          end: end - entry.start,
+          absoluteStart: start
+        });
+      });
+    });
+    // Split from right to left so earlier offsets in a shared text node remain valid.
+    operations.sort(function (a, b) { return b.absoluteStart - a.absoluteStart; });
+    operations.forEach(function (op) {
+      var node = op.node;
+      var parent = node && node.parentNode;
+      if (!parent || typeof node.splitText !== 'function' || !document.createElement) return;
+      var value = String(node.nodeValue || '');
+      if (op.start < 0 || op.end > value.length || op.start >= op.end) return;
+      if (op.end < value.length) node.splitText(op.end);
+      var segment = op.start > 0 ? node.splitText(op.start) : node;
+      var wrapper = document.createElement('span');
+      wrapper.setAttribute('data-sd-run-raw-hidden', '');
+      wrapper.setAttribute('aria-hidden', 'true');
+      segment.parentNode.replaceChild(wrapper, segment);
+      wrapper.appendChild(segment);
+      nextHidden.add(wrapper);
+    });
+  }
+
   function generating() {
     return !!document.querySelector('.ds-icon-stop-circle, .ds-icon-stop');
   }
@@ -381,7 +637,7 @@
   function currentKey() {
     var els = messageEls();
     for (var i = els.length - 1; i >= 0; i--) {
-      if (roleOf(els[i]) === 'user' && !isAutoUser(els[i])) return keyFor(userText(els[i]));
+      if (roleOf(els[i]) === 'user' && !isAutoUser(els[i], 'user')) return keyFor(userText(els[i]));
     }
     return sessionId() + '|live';
   }
@@ -558,10 +814,14 @@
     var els = messageEls();
     var list = els.map(function (el) {
       var role = roleOf(el);
-      return { role: role, auto: role === 'user' && isAutoUser(el), calls: role === 'assistant' ? el.querySelectorAll('.bds-mcp-loading').length : 0 };
+      var text = protocolText(el);
+      var auto = isAutoUser(el, role, text);
+      return classifyMessage(role, text,
+        role === 'assistant' ? el.querySelectorAll('.bds-mcp-loading').length : 0, auto);
     });
     var runs = groupRuns(list);
     var nextHidden = new Set();
+    var nextRawHidden = new Set();
     var nextHosts = new Set();
     var seen = new Set();
     var realAfter = 0;
@@ -576,6 +836,7 @@
       var host = els[run.host];
       host.setAttribute('data-sd-run-host', '');
       nextHosts.add(host);
+      hideRawCallBlocks(host, nextRawHidden);
       seen.add(ensureCard(info));
       if (info.running) anyRunning = true;
       if (run.last) lastRunKey = info.key;
@@ -583,6 +844,9 @@
     hiddenRows.forEach(function (r) { if (!nextHidden.has(r)) r.removeAttribute('data-sd-run-hidden'); });
     nextHidden.forEach(function (r) { if (!r.hasAttribute('data-sd-run-hidden')) r.setAttribute('data-sd-run-hidden', ''); });
     hiddenRows = nextHidden;
+    hiddenRawNodes.forEach(function (node) { if (!nextRawHidden.has(node)) restoreHiddenRawNode(node); });
+    nextRawHidden.forEach(function (node) { if (!node.hasAttribute('data-sd-run-raw-hidden')) node.setAttribute('data-sd-run-raw-hidden', ''); });
+    hiddenRawNodes = nextRawHidden;
     hostEls.forEach(function (h) { if (!nextHosts.has(h)) h.removeAttribute('data-sd-run-host'); });
     hostEls = nextHosts;
     cards.forEach(function (c) {
@@ -596,6 +860,8 @@
   function reset() {
     hiddenRows.forEach(function (r) { r.removeAttribute('data-sd-run-hidden'); });
     hiddenRows = new Set();
+    hiddenRawNodes.forEach(function (node) { restoreHiddenRawNode(node); });
+    hiddenRawNodes = new Set();
     hostEls.forEach(function (h) { h.removeAttribute('data-sd-run-host'); });
     hostEls = new Set();
     cards.forEach(function (c) { c.remove(); });
@@ -769,6 +1035,7 @@
 
   var CSS = [
     '[data-sd-run-hidden]{display:none!important}',
+    '[data-sd-run-raw-hidden]{display:none!important}',
     '[data-sd-run-host] .bds-mcp-loading{display:none!important}',
     'html.sd-run-card-visible #sd-agent-chip{display:none!important}',
     '.sd-run-card{margin:10px 0 4px;padding:10px 12px;border-radius:14px;border:1px solid var(--bds-border,rgba(127,127,127,.25));',
@@ -872,6 +1139,15 @@
     _branch: branch,
     _matchRun: matchRun,
     _parseResults: parseResults,
+    _rawCallCount: rawCallCount,
+    _findRawCallSpans: findRawCallSpans,
+    _protocolText: protocolText,
+    _hideRawCallBlocks: hideRawCallBlocks,
+    _restoreHiddenRawNode: restoreHiddenRawNode,
+    _isProtocolResultText: isProtocolResultText,
+    _isAutoUserText: isAutoUserText,
+    _classifyMessage: classifyMessage,
+    _hideRawCallBlocks: hideRawCallBlocks,
     _stripTags: stripTags,
     _callSummary: callSummary,
     _fmtDur: fmtDur,
