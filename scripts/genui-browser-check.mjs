@@ -214,9 +214,9 @@ try {
     const { ctx, page, errors } = await fresh();
     await page.evaluate(() => {
       const md = fx.message();
-      fx.block(md, 'sds-genui', 'kind: ui\\ntitle: First Broken Spec\\n---\\n{first: invalid');
+      fx.block(md, 'sds-genui', 'kind: ui\ntitle: First Broken Spec\n---\n{first: invalid');
       fx.para(md, 'between');
-      fx.block(md, 'sds-genui', 'kind: ui\\ntitle: Second Broken Spec\\n---\\n{second: invalid');
+      fx.block(md, 'sds-genui', 'kind: ui\ntitle: Second Broken Spec\n---\n{second: invalid');
       fx.para(md, 'done');
     });
     const first = page.locator('.sd-art[data-kind="code"]').filter({ hasText: 'First Broken Spec' });
@@ -233,9 +233,9 @@ try {
     const { ctx, page, errors } = await fresh();
     await page.evaluate(() => {
       const md = fx.message();
-      fx.block(md, 'sds-genui', 'id: stable-app\\nkind: html-app\\ntitle: Working App\\n---\\n<!doctype html><html><head><title>Working</title></head><body><h1>Working app</h1></body></html>');
+      fx.block(md, 'sds-genui', 'id: stable-app\nkind: html-app\ntitle: Working App\n---\n<!doctype html><html><head><title>Working</title></head><body><h1>Working app</h1></body></html>');
       fx.para(md, 'next');
-      fx.block(md, 'sds-genui', 'id: stable-app\\nkind: ui\\ntitle: Broken Revision\\n---\\n{not valid JSON');
+      fx.block(md, 'sds-genui', 'id: stable-app\nkind: ui\ntitle: Broken Revision\n---\n{not valid JSON');
       fx.para(md, 'done');
     });
     await page.locator('.sd-art[data-kind="html-app"]').filter({ hasText: 'Working App' }).waitFor();
@@ -243,6 +243,26 @@ try {
     const recs = await page.evaluate(() => window.__sdGenUIViewer.store.list().map(r => ({ key: r.key, kind: r.kind, title: r.title, versions: r.versions.length })));
     assert.ok(recs.some(r => r.kind === 'html-app' && r.title === 'Working App' && r.key.endsWith(':stable-app')), JSON.stringify(recs));
     assert.ok(recs.some(r => r.kind === 'code' && r.title === 'Broken Revision' && r.key.includes(':stable-app-source-')), JSON.stringify(recs));
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
+
+  await test('02h uppercase streaming ID moves from transient viewer to source-only fallback', async () => {
+    const { ctx, page, errors } = await fresh();
+    await page.evaluate(() => {
+      const md = fx.message();
+      window.__streamBadMd = md;
+      fx.block(md, 'sds-genui', 'id: My-Widget\nkind: svg\ntitle: Streaming broken SVG\n---\nnot an svg document');
+    });
+    const busy = page.locator('.sd-art.sd-art-busy');
+    await busy.waitFor({ timeout: 4000 });
+    await busy.click();
+    await page.locator('#sd-viewer .sd-code').waitFor({ timeout: 4000 });
+    await page.evaluate(() => fx.para(window.__streamBadMd, 'seal malformed block'));
+    const card = page.locator('.sd-art[data-kind="code"]').filter({ hasText: 'Streaming broken SVG' });
+    await card.waitFor({ timeout: 7000 });
+    await page.locator('#sd-viewer .sd-code').waitFor({ timeout: 5000 });
+    assert.match(await page.locator('#sd-viewer .sd-code').textContent() || '', /not an svg document/);
     assert.deepEqual(errors, []);
     await ctx.close();
   });
