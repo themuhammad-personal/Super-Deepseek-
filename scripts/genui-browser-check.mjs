@@ -112,14 +112,19 @@ try {
     await page.evaluate(() => { const a = fx.message(); fx.block(a, 'sds-genui', 'id: old-one\nkind: document\ntitle: Old notes\n---\n# Old\ntext'); fx.message(); });
     await page.locator('.sd-art', { hasText: 'Old notes' }).waitFor({ timeout: 3000 });
     assert.ok(Date.now() - t0 < 1200, 'old-chat block rendered in ' + (Date.now() - t0) + 'ms');
-    // Broken block: a quiet error card, code hidden behind a toggle.
+    // Broken typed output becomes a source-only artifact; raw code stays hidden until opened.
     await page.evaluate(() => { const a = fx.message(); fx.block(a, 'sds-genui', 'id: broken\nkind: ui\ntitle: Broken\n---\n{not json'); fx.para(a, 'x'); });
-    const err = page.locator('.sd-art-error').last();
-    await err.waitFor({ timeout: 4000 });
-    const hidden = await page.evaluate(() => { const e = [...document.querySelectorAll('.sd-art-error')].pop(); const c = e.nextElementSibling; return getComputedStyle(c).display === 'none'; });
-    assert.equal(hidden, true, 'raw code hidden under the error card');
-    await err.locator('button', { hasText: /Show code/ }).click();
-    assert.equal(await page.evaluate(() => { const e = [...document.querySelectorAll('.sd-art-error')].pop(); return getComputedStyle(e.nextElementSibling).display !== 'none'; }), true);
+    const fallback = page.locator('.sd-art[data-kind="code"]').filter({ hasText: 'Broken' }).last();
+    await fallback.waitFor({ timeout: 4000 });
+    const hidden = await page.evaluate(() => {
+      const source = [...document.querySelectorAll('.md-code-block[data-sd-hidden="artifact"]')].pop();
+      return !!source && getComputedStyle(source).display === 'none';
+    });
+    assert.equal(hidden, true, 'raw code stays hidden behind the source-only artifact');
+    assert.match(await fallback.locator('.sd-art-sub').textContent() || '', /Source only/);
+    await fallback.click();
+    await page.locator('#sd-viewer .sd-code').waitFor({ timeout: 4000 });
+    assert.match(await page.locator('#sd-viewer .sd-code').textContent() || '', /\{not json/);
     await shot(page, '00-claim.png');
     assert.deepEqual(errors, []);
     await ctx.close();
@@ -356,6 +361,7 @@ try {
     const { ctx, page, errors } = await fresh();
     await page.evaluate(() => {
       const md = fx.message();
+      window.__failedPreviewMd = md;
       window.__savedGenUIForReset = window.__sdGenUI;
       delete window.__sdGenUI;
       for (let i = 0; i < 5; i++) {
@@ -370,6 +376,9 @@ try {
     await page.evaluate(() => {
       const P = window.__sdGenUIPrompt;
       P.setConfig({ enabled: false });
+      // Keep the deliberately broken historical fixtures from immediately
+      // re-tripping the circuit when the feature is re-enabled.
+      if (window.__failedPreviewMd) window.__failedPreviewMd.remove();
       window.__sdGenUI = window.__savedGenUIForReset;
       P.setConfig({ enabled: true });
       const md = fx.message();
