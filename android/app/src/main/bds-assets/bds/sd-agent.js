@@ -28,6 +28,8 @@
   var SERVER = { name: 'sandbox', serverUrl: 'sandbox://linux', enabled: true, apiKey: '' };
   var IDLE_MS = 10000;
   var HISTORY_TIMEOUT_MS = 5000;
+  // Ask mode must fail closed if the page cannot show its approval UI.
+  var CONFIRMATION_UNAVAILABLE = {};
 
   function bridge() { return window.AndroidBridge || null; }
 
@@ -712,7 +714,7 @@
 
   function confirmCall(payload) {
     return new Promise(function (resolve) {
-      if (!document.body) return resolve('run');
+      if (!document.body) return resolve(CONFIRMATION_UNAVAILABLE);
       ensureChip();
       var old = document.getElementById('sd-agent-confirm');
       if (old) old.remove();
@@ -1172,6 +1174,7 @@
         render();
         if (mode() !== 'ask') return p;
         return confirmCall(p).then(function (choice) {
+          if (choice === CONFIRMATION_UNAVAILABLE) return choice;
           if (choice === 'skip') return null;
           if (choice === 'always') {
             setPref(PREF_MODE, 'auto');
@@ -1181,6 +1184,7 @@
         });
       })
       .then(function (p) {
+        if (p === CONFIRMATION_UNAVAILABLE) return { ok: false, error: 'Confirmation UI unavailable; action was not run.' };
         if (!p) return { ok: false, error: 'The user declined this action. Ask them or try another approach.' };
         if (window.__sdAgentStopped) return stoppedReply();
         return inner(p);

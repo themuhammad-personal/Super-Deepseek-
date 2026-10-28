@@ -137,6 +137,24 @@ test('falls back to the engine args when the history has no match', async () => 
   assert.deepEqual(plain(calls[0].args), { command: 'ls' });
 });
 
+test('ask mode fails closed when the confirmation UI is unavailable', async () => {
+  // load() intentionally has no document.body, reproducing a page state where
+  // the ask-mode approval sheet cannot be mounted.
+  const { win, calls } = load({
+    info: { supported: true, enabled: true, mode: 'ask' },
+    speed: 1000,
+  });
+  const reply = await win.__sdBridgeFetch({
+    type: 'bds-mcp-call',
+    serverUrl: 'sandbox',
+    toolName: 'run',
+    args: { command: 'echo should-not-run' },
+  });
+  assert.equal(reply.ok, false);
+  assert.match(reply.error, /Confirmation UI unavailable/);
+  assert.equal(calls.length, 0, 'the sandbox bridge must not receive a call without approval UI');
+});
+
 test('other bridge messages pass straight through', async () => {
   const { win, calls } = load();
   await win.__sdBridgeFetch({ type: 'bds-fetch-url', url: 'https://x' });
