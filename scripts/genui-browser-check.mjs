@@ -178,7 +178,16 @@ try {
     const inline = page.locator('.sd-inline[data-kind="svg"]');
     await inline.waitFor({ timeout: 5000 });
     assert.equal(await page.locator('.sd-art').count(), 0, 'explicit inline content is not stored as a card');
-    await page.frameLocator('.sd-inline iframe').locator('circle').waitFor({ timeout: 5000 });
+    const frame = page.locator('.sd-inline[data-kind="svg"] iframe.sd-frame');
+    await frame.contentFrame().locator('circle').waitFor({ timeout: 5000 });
+    await page.waitForFunction(() => {
+      const stage = document.querySelector('.sd-inline[data-kind="svg"] .sd-vis-stage');
+      const frame = stage && stage.querySelector('iframe.sd-frame');
+      return !!stage && !stage.classList.contains('sd-vis-loading') && !!frame &&
+        frame.getBoundingClientRect().height > 30 && getComputedStyle(frame).opacity !== '0';
+    }, null, { timeout: 5000 });
+    const box = await frame.boundingBox();
+    assert.ok(box && box.height > 30, 'inline SVG frame must have visible layout height');
     assert.deepEqual(errors, []);
     await shot(page, '02b-json-inline-presentation.png');
     await ctx.close();
