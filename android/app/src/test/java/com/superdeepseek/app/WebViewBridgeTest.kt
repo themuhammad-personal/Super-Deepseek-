@@ -596,6 +596,35 @@ class WebViewBridgeTest {
     }
 
     @Test
+    fun `mcp list tools rejects an SSE response with an unrelated JSON-RPC id`() {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setHeader("Mcp-Session-Id", "sess-sse-mismatch")
+                .setBody("""{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05"}}""")
+        )
+        server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "text/event-stream")
+                .setHeader("Mcp-Session-Id", "sess-sse-mismatch")
+                .setBody("event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":999,\"result\":{\"tools\":[{\"name\":\"unrelated_tool\"}]}}\n\n")
+        )
+
+        val payload = JSONObject().apply {
+            put("type", "bds-mcp-list-tools")
+            put("serverUrl", server.url("/mcp").toString())
+            put("apiKey", "test-key")
+        }
+        val response = JSONObject(bridge.fetch(payload.toString()))
+
+        assertFalse(response.getBoolean("ok"))
+        assertTrue(response.getString("error").contains("matching JSON-RPC response"))
+    }
+
+    @Test
     fun `mcp call tool executes tool call with args successfully`() {
         server.enqueue(
             MockResponse()

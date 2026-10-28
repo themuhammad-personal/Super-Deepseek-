@@ -23,10 +23,13 @@ class McpSseTest {
         assertEquals(2, McpSse.readResponse(r(body), 2, 1_000_000)!!.getJSONObject("result").getInt("a"))
     }
 
-    @Test fun `id compare tolerates string vs number and falls back to last response`() {
+    @Test fun `id compare tolerates string versus number but rejects unmatched responses`() {
         assertNotNull(McpSse.readResponse(r("data: {\"id\":\"3\",\"result\":{}}\n\n"), 3, 1000))
-        val fb = McpSse.readResponse(r("data: {\"id\":9,\"result\":{\"x\":1}}\n"), 3, 1000)
-        assertEquals(1, fb!!.getJSONObject("result").getInt("x"))
+        val unrelated = "data: {\"id\":9,\"result\":{\"x\":1}}\n"
+        assertNull(McpSse.readResponse(r(unrelated), 3, 1000))
+        val staleThenProgress = "data: {\"jsonrpc\":\"2.0\",\"id\":9,\"result\":{\"x\":1}}\n\n" +
+            "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\"}\n\n"
+        assertNull(McpSse.readResponse(r(staleThenProgress), 3, 1000))
         assertNull(McpSse.readResponse(r("data: [DONE]\n\n"), 3, 1000))
     }
 
