@@ -587,14 +587,10 @@ class MainActivity : ComponentActivity() {
                 override fun onPageFinished(view: WebView, url: String?) {
                     super.onPageFinished(view, url)
                     Log.d("SuperDeepSeek", "Official WebView loaded: $url")
-                    if (url?.contains("chat.deepseek.com") == true) {
-                        // The engine bundle (once per document, see injectBdsScripts).
-                        injectBdsScripts(view)
-                        // The launch screen stays until the enhanced page is really
-                        // on screen (see READY_PROBE_JS); then the bars pick up the
-                        // page colour.
-                        pageFinishedAt = android.os.SystemClock.uptimeMillis()
-                        startReadyPoll()
+                    if (isTrustedBridgeUrl(url)) {
+                        // Leave DeepSeek's sign-in and CAPTCHA surface untouched. The
+                        // engine starts only once the real chat composer is visible.
+                        startPageSurfaceWatch(view)
                         syncSystemBarsWithPage()
                         if (bootView == null) scheduleBarRefresh(BAR_REFRESH_THEME_MS)
                     }
@@ -724,9 +720,10 @@ class MainActivity : ComponentActivity() {
         SandboxService.onStopRequested = stopAgentInPage
         showNativeBootOverlay()
 
-        // The official DeepSeek site IS the chat surface; the engine (assets/bds)
-        // is injected on every page load. After a renderer crash or a process kill (long agent tasks in the
-        // background) the open conversation is reopened instead of a blank chat.
+        // The official DeepSeek site is shown in this WebView. Keep the sign-in
+        // and CAPTCHA flow untouched; the engine (assets/bds) starts only after a
+        // real chat composer appears. After a renderer crash or process restore,
+        // the open conversation is reopened instead of a blank chat.
         val restoreUrl = savedInstanceState?.getString(KEY_CHAT_URL) ?: rendererLostUrl
         rendererLostUrl = null
         officialWebView.loadUrl(ChatUrls.restorable(restoreUrl) ?: "https://chat.deepseek.com/")
@@ -836,6 +833,60 @@ class MainActivity : ComponentActivity() {
         }.start()
     }
 
+    /**
+     * Poll the live page before injecting anything. The sign-in form and CAPTCHA
+     * are part of DeepSeek's own web app; our content/UI hooks are only needed
+     * after the chat composer exists. This also covers SPA login flows, where
+     * changing from sign-in to chat does not produce another onPageFinished.
+     */
+    private fun startPageSurfaceWatch(view: WebView) {
+        if (view !== officialWebView || !isTrustedBridgeUrl(view.url)) return
+        pageSurfaceWatchGeneration += 1
+        handler.removeCallbacks(pageSurfacePoll)
+        probeDeepSeekPageSurface(view, pageSurfaceWatchGeneration)
+    }
+
+    private fun probeDeepSeekPageSurface(view: WebView, generation: Int) {
+        if (view !== officialWebView || isFinishing || isDestroyed) return
+        if (generation != pageSurfaceWatchGeneration) return
+        if (!isTrustedBridgeUrl(runCatching { view.url }.getOrNull())) {
+            handler.removeCallbacks(pageSurfacePoll)
+            return
+        }
+        view.evaluateJavascript(DEEPSEEK_PAGE_SURFACE_PROBE_JS) { raw ->
+            if (generation != pageSurfaceWatchGeneration ||
+                view !== officialWebView || isFinishing || isDestroyed
+            ) return@evaluateJavascript
+
+            when (parseDeepSeekPageSurface(raw)) {
+                DeepSeekPageSurface.CHAT -> {
+                    handler.removeCallbacks(pageSurfacePoll)
+                    Log.d("SuperDeepSeek", "Chat composer detected; loading Super DeepSeek engine")
+                    // These are the same readiness/bar-colour steps used before, but
+                    // only after login has reached the actual chat surface.
+                    injectBdsScripts(view)
+                    pageFinishedAt = android.os.SystemClock.uptimeMillis()
+                    startReadyPoll()
+                    syncSystemBarsWithPage()
+                    if (bootView == null) scheduleBarRefresh(BAR_REFRESH_THEME_MS)
+                }
+                DeepSeekPageSurface.AUTH -> {
+                    if (!bootDismissed) {
+                        Log.d("SuperDeepSeek", "Sign-in/CAPTCHA detected; deferring engine injection")
+                        syncSystemBarsWithPage()
+                        dismissBoot()
+                    }
+                    handler.removeCallbacks(pageSurfacePoll)
+                    handler.postDelayed(pageSurfacePoll, DEEPSEEK_AUTH_POLL_MS)
+                }
+                DeepSeekPageSurface.LOADING -> {
+                    handler.removeCallbacks(pageSurfacePoll)
+                    handler.postDelayed(pageSurfacePoll, DEEPSEEK_PAGE_POLL_MS)
+                }
+            }
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Launch sequence
     //
@@ -853,6 +904,11 @@ class MainActivity : ComponentActivity() {
     private var uiPolished = false
     private var pageFinishedAt = 0L
     private var readyPollRunning = false
+    /** Incremented for every main-frame load so stale JS callbacks cannot start the engine. */
+    private var pageSurfaceWatchGeneration = 0
+    private val pageSurfacePoll: Runnable = Runnable {
+        probeDeepSeekPageSurface(officialWebView, pageSurfaceWatchGeneration)
+    }
 
     private companion object {
         /** Native engine modules, in load order (sd-run after sd-agent: it uses its history API; GenUI: protocol → svg → prompt → host → renderer → visuals → artifacts → panel). */
