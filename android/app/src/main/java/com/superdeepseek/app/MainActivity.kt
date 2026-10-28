@@ -720,9 +720,10 @@ class MainActivity : ComponentActivity() {
         SandboxService.onStopRequested = stopAgentInPage
         showNativeBootOverlay()
 
-        // The official DeepSeek site IS the chat surface; the engine (assets/bds)
-        // is injected on every page load. After a renderer crash or a process kill (long agent tasks in the
-        // background) the open conversation is reopened instead of a blank chat.
+        // The official DeepSeek site is shown in this WebView. Keep the sign-in
+        // and CAPTCHA flow untouched; the engine (assets/bds) starts only after a
+        // real chat composer appears. After a renderer crash or process restore,
+        // the open conversation is reopened instead of a blank chat.
         val restoreUrl = savedInstanceState?.getString(KEY_CHAT_URL) ?: rendererLostUrl
         rendererLostUrl = null
         officialWebView.loadUrl(ChatUrls.restorable(restoreUrl) ?: "https://chat.deepseek.com/")
