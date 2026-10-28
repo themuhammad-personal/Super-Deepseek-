@@ -174,7 +174,7 @@ try {
 
   await test('02b JSON envelope honors explicit inline presentation instead of opening an artifact card', async () => {
     const { ctx, page, errors } = await fresh();
-    await page.evaluate(() => { const md = fx.message(); fx.classic(md, 'sds-genui', JSON.stringify({ version: 1, id: 'inline-moon', kind: 'svg', title: 'Inline Moon', presentation: 'inline', payload: { svg: '<svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="gold"/></svg>' } })); });
+    await page.evaluate(() => { const md = fx.message(); fx.classic(md, 'sds-genui', JSON.stringify({ version: 1, id: 'inline-moon', kind: 'svg', title: 'Inline Moon', presentation: 'inline', payload: { svg: '<svg viewBox="0 0 10 10" width="100%"><circle cx="5" cy="5" r="4" fill="gold"/></svg>' } })); });
     const inline = page.locator('.sd-inline[data-kind="svg"]');
     await inline.waitFor({ timeout: 5000 });
     assert.equal(await page.locator('.sd-art').count(), 0, 'explicit inline content is not stored as a card');
@@ -187,7 +187,10 @@ try {
         frame.getBoundingClientRect().height > 30 && getComputedStyle(frame).opacity !== '0';
     }, null, { timeout: 5000 });
     const box = await frame.boundingBox();
+    const svgBox = await frame.contentFrame().locator('svg').boundingBox();
     assert.ok(box && box.height > 30, 'inline SVG frame must have visible layout height');
+    assert.ok(svgBox && svgBox.height > 30, 'SVG must have a visible content box');
+    assert.ok(svgBox.y + svgBox.height <= box.y + box.height + 1, 'inline frame must contain the full SVG without clipping');
     assert.deepEqual(errors, []);
     await shot(page, '02b-json-inline-presentation.png');
     await ctx.close();
