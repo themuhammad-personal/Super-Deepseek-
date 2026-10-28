@@ -106,9 +106,9 @@ test('artifact normalization honors explicit inline presentation in JSON envelop
   assert.equal(inline.inline, true, 'JSON envelope presentation is honored');
   const card = A.normalize('sds-genui', JSON.stringify({ version: 1, id: 'card-svg', kind: 'svg', title: 'Card chart', payload: { svg } }), true);
   assert.equal(card.inline, false, 'omitting presentation keeps the default artifact card');
-  const header = A.normalize('sds-genui', 'id: header-svg\\nkind: svg\\ntitle: Header SVG\\npresentation: inline\\n---\\n' + svg, true);
+  const header = A.normalize('sds-genui', 'id: header-svg\nkind: svg\ntitle: Header SVG\npresentation: inline\n---\n' + svg, true);
   assert.equal(header.inline, true, 'header format keeps inline presentation');
-  const bodyMention = A.normalize('sds-genui', 'id: body-note\\nkind: document\\ntitle: Notes\\n\\nThe phrase presentation: inline is ordinary document text.', true);
+  const bodyMention = A.normalize('sds-genui', 'id: body-note\nkind: document\ntitle: Notes\n\nThe phrase presentation: inline is ordinary document text.', true);
   assert.equal(bodyMention.inline, false, 'body text must not be interpreted as a header');
 });
 
