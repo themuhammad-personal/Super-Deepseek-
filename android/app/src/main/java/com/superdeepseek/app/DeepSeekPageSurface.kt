@@ -13,7 +13,7 @@ internal enum class DeepSeekPageSurface {
 
 /** WebView.evaluateJavascript returns a JSON-quoted string for JS string values. */
 internal fun parseDeepSeekPageSurface(raw: String?): DeepSeekPageSurface =
-    when (raw?.trim()?.removeSurrounding("\"")?.trim()?.lowercase()) {
+    when (raw?.trim()?.removeSurrounding("\"")?.trim()) {
         "chat" -> DeepSeekPageSurface.CHAT
         "auth" -> DeepSeekPageSurface.AUTH
         else -> DeepSeekPageSurface.LOADING
