@@ -11,7 +11,7 @@
     image:'svg',illustration:'svg',vector:'svg',icon:'svg',
     widget:'ui',json:'ui','mcp':'mcp-app','toolresult':'tool-result','tool_result':'tool-result'}, TOOL_VIEWS = ['auto','table','chart','cards','json'];
   var HEADER_KEYS = ['version','id','kind','title','revision','presentation','name','view','server','resource','language','type'];
-  var CODE_LANGS = /^(python|py|javascript|js|typescript|ts|java|kotlin|kt|swift|go|rust|rs|c|cpp|c\+\+|csharp|cs|c#|php|ruby|rb|bash|sh|shell|sql|css|scss|yaml|yml|toml|dart|lua|r|scala|perl|haskell|elixir|zig)$/;
+  var CODE_LANGS = /^(python|py|javascript|js|typescript|ts|java|kotlin|kt|swift|go|rust|rs|c|cpp|c\+\+|csharp|cs|c#|php|ruby|rb|bash|sh|shell|sql|css|scss|yaml|yml|toml|dart|lua|r|scala|perl|haskell|elixir|zig|csv|tsv|jsonl|json5|ini|env|dotenv|properties|conf|config|graphql|gql|proto|protobuf|dockerfile|makefile|ipynb|txt|log|diff|ps1|powershell|groovy|gradle|kts|bat|batch)$/;
   function slugId(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').replace(/^(?![a-z])/, 'a-').slice(0, 64) || 'artifact'; }
   /** Infer a kind from the body when the header is missing or unknown. */
   function inferKind(body) {

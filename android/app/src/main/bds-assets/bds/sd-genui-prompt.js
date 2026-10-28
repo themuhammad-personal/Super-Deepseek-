@@ -32,7 +32,8 @@
     apps: /(game|app\b|application|interactive|simulat|animation|prototype|website|web ?page|landing|screen|\bui\b|interface|mockup|wireframe|widget|tool\b|tracker|converter|form\b|quiz|timer|clock|todo|to-do|canvas|html|গেম|অ্যাপ|ইন্টারঅ্যাকটিভ|সিমুলেশন|প্রোটোটাইপ|ওয়েবসাইট|স্ক্রিন|ইউআই|ইন্টারফেস|মকআপ|ওয়্যারফ্রেম|ট্র্যাকার|কুইজ|টাইমার)/i,
     svg: /(svg|illustrat|drawing|draw|poster|logo|icon|infographic|scene|artwork|vector|map\b|আঁকো|চিত্র|পোস্টার|লোগো|আইকন|ইনফোগ্রাফিক|মানচিত্র)/i,
     mcp: /(mcp|tool result|server|connector|integration|api result|weather|stock|search result|এমসিপি|সার্ভার|টুল)/i,
-    edit: /(artifact|revision|edit (the|this|my)|update (the|this)|change (the|this)|fix (the|this)|আর্টিফ্যাক্ট|এডিট|পরিবর্তন কর|ঠিক কর)/i
+    edit: /(artifact|revision|edit (the|this|my)|update (the|this)|change (the|this)|fix (the|this)|আর্টিফ্যাক্ট|এডিট|পরিবর্তন কর|ঠিক কর)/i,
+    file: /(?:\b(?:create|make|write|generate|produce|prepare|draft|save|export|download|build)\b[\s\S]{0,60}\b(?:(?:a|an|the|new|my|your)\s+)*(?:file|document|report|resume|cv|spreadsheet|workbook|csv spreadsheet|tsv spreadsheet|slide deck|slides|presentation|readme|changelog|config(?:uration)? file|manifest file|code file|source file|text file|python file|javascript file|typescript file|kotlin file|java file|shell file|bash file|powershell file|html file|css file|json file|yaml file|xml file|sql file|csv file|tsv file|graphql file|protobuf file|proto file|pdf|docx|xlsx|pptx|ipynb|dockerfile|makefile|env file)\b|(?:\b(?:save|export|download|create|make|write|generate|prepare|draft)\b[\s\S]{0,80}\b(?:as|to|named|called)\s*["']?[\w.-]+\.(?:txt|md|markdown|json|jsonl|json5|csv|tsv|yaml|yml|toml|ini|xml|html|htm|css|js|ts|jsx|tsx|py|java|kt|sh|sql|pdf|docx|xlsx|pptx|ipynb|graphql|gql|proto|protobuf|dockerfile|makefile|env|properties|conf|gradle|kts|ps1|diff|log)\b)|(?:তৈরি|বানাও|বানিয়ে|লিখে|সেভ|ডাউনলোড|এক্সপোর্ট)[\s\S]{0,70}(?:ফাইল|ডকুমেন্ট|নথি|রিপোর্ট|স্প্রেডশিট|ওয়ার্কবুক|স্লাইড|প্রেজেন্টেশন|স্ক্রিপ্ট ফাইল|কোড ফাইল|কনফিগ ফাইল|রিডমি|পিডিএফ|ওয়ার্ড|এক্সেল|গ্রাফকিউএল|প্রোটোবাফ)|(?:ফাইল|ডকুমেন্ট|নথি|রিপোর্ট|স্প্রেডশিট|ওয়ার্কবুক|স্লাইড|প্রেজেন্টেশন|স্ক্রিপ্ট ফাইল|কোড ফাইল|কনফিগ ফাইল|রিডমি|পিডিএফ|ওয়ার্ড|এক্সেল|গ্রাফকিউএল|প্রোটোবাফ)[\s\S]{0,70}(?:তৈরি|বানাও|বানিয়ে|লিখে|সেভ|ডাউনলোড|এক্সপোর্ট))/i,
   };
 
   var MODULES = {
@@ -44,6 +45,7 @@
       '- Explain a concept, process, structure, comparison, trend, or let the user explore numbers → an inline visual: ```sds-visual (HTML/SVG drawn into the answer, like a figure). Put 1–3 sentences of prose before it and the explanation after it.',
       '- Simple calculator/dashboard/table/timeline from fixed components → ```sds-ui (validated JSON widget).',
       '- A standalone deliverable the user will keep, reuse, edit or download (app, game, website, document, long code file, diagram, poster) → an artifact: ```sds-genui with headers. It appears as a card the user opens in a side viewer.',
+      '- If the user explicitly asks to create, write, save, export or download a file, ALWAYS return it as a ```sds-genui artifact—even plain text, source code, configuration, JSON, CSV or other data. Use the requested filename in the title when possible. Never replace an explicitly requested file with prose or only an inline visual.',
       'The old <SDS:VISUALIZER> tag is deprecated in this app: use ```sds-visual instead (it streams, matches the chat theme and resizes itself). Do not wrap visuals in any other tag.',
       'Rules: close every fence; never put secrets, API keys, tokens or personal data in blocks; never invent factual numbers — label illustrative values as examples; do not claim you ran or tested anything you did not.'
     ].join('\n'),
@@ -65,7 +67,8 @@
       '---',
       '<body>',
       '```',
-      'Bodies: html-app = complete single-file HTML document (inline <style>/<script>; CDN libraries allowed from cdnjs/jsdelivr/unpkg/esm.sh; fetch() of public http(s) URLs works after the user approves the site, without cookies); react = one JSX file with `export default function App()`; imports allowed: react, recharts, lucide-react, d3, three, chart.js, framer-motion, lodash; Tailwind classes work; document = markdown; code = the source file; mermaid = mermaid diagram source; svg = one complete <svg> with viewBox.',
+      'Bodies: html-app = complete single-file HTML document for a runnable/interactive app (inline <style>/<script>; CDN libraries allowed from cdnjs/jsdelivr/unpkg/esm.sh); react = one JSX file with `export default function App()`; document = Markdown; code = a downloadable source/data/config file; mermaid = Mermaid diagram source; svg = one complete <svg> with viewBox.',
+      'File-first contract: every file request uses a ```sds-genui artifact. Use the exact requested filename, including extension, as `title`; use `kind: code` with `language: csv|tsv|json|jsonl|json5|yaml|toml|ini|xml|sql|python|javascript|typescript|kotlin|java|html|css|jsx|tsx|ipynb|env|dockerfile|makefile` for downloadable text/source/data files, `kind: document` for Markdown, `kind: html-app` only for a runnable app, and `kind: svg` or `kind: mermaid` for a diagram the user wants to keep. Do not claim true binary PDF, DOCX, XLSX, or PPTX files were created; where binary export is unavailable, provide a clearly labelled print-ready HTML/Markdown or CSV source artifact and state its actual format.',
       'Updating: to change an artifact, reuse the same id and return the complete new version (never a diff); the viewer keeps every version. One artifact per message unless asked for more. Keep prose outside the block short.',
       'App design: mobile-first (360px+), clear hierarchy and one primary action, system-ui type scale 14/16/20/28, 8px spacing grid, one accent colour, WCAG AA contrast, 44px touch targets, labelled controls, empty/error states, light + dark via prefers-color-scheme, honour prefers-reduced-motion. Games need touch controls, score and restart. Under 120 KB.'
     ].join('\n'),
@@ -154,7 +157,7 @@
     var hasMcp = !!(ctx && ctx.mcpConfigured);
     if (cfg.modules.visual && INTENT.any.test(s)) picked.push('visual');
     if (cfg.modules.schema && INTENT.schema.test(s)) picked.push('schema');
-    if (cfg.modules.apps && INTENT.apps.test(s)) picked.push('apps');
+    if (cfg.modules.apps && (INTENT.apps.test(s) || INTENT.file.test(s))) picked.push('apps');
     if (cfg.modules.svg && INTENT.svg.test(s)) picked.push('svg');
     if (cfg.modules.mcp && (hasMcp || INTENT.mcp.test(s))) picked.push('mcp');
     // A visual request with no specific module still benefits from the schema renderer.
@@ -170,8 +173,8 @@
     switch (cfg.frequency) {
       case 'always': return true;
       case 'first': return !!(ctx && ctx.isFirst) || count === 1;
-      case 'every_n': return count === 1 || (count - 1) % cfg.interval === 0 || INTENT.edit.test(s);
-      default: return INTENT.any.test(s) || INTENT.edit.test(s);
+      case 'every_n': return count === 1 || (count - 1) % cfg.interval === 0 || INTENT.edit.test(s) || INTENT.file.test(s);
+      default: return INTENT.any.test(s) || INTENT.file.test(s) || INTENT.edit.test(s);
     }
   }
   /** Returns the hidden prompt for this turn or '' when nothing should be injected. */

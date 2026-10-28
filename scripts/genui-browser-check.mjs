@@ -112,14 +112,19 @@ try {
     await page.evaluate(() => { const a = fx.message(); fx.block(a, 'sds-genui', 'id: old-one\nkind: document\ntitle: Old notes\n---\n# Old\ntext'); fx.message(); });
     await page.locator('.sd-art', { hasText: 'Old notes' }).waitFor({ timeout: 3000 });
     assert.ok(Date.now() - t0 < 1200, 'old-chat block rendered in ' + (Date.now() - t0) + 'ms');
-    // Broken block: a quiet error card, code hidden behind a toggle.
-    await page.evaluate(() => { const a = fx.message(); fx.block(a, 'sds-genui', 'id: broken\nkind: ui\ntitle: Broken\n---\n{not json'); fx.para(a, 'x'); });
-    const err = page.locator('.sd-art-error').last();
-    await err.waitFor({ timeout: 4000 });
-    const hidden = await page.evaluate(() => { const e = [...document.querySelectorAll('.sd-art-error')].pop(); const c = e.nextElementSibling; return getComputedStyle(c).display === 'none'; });
-    assert.equal(hidden, true, 'raw code hidden under the error card');
-    await err.locator('button', { hasText: /Show code/ }).click();
-    assert.equal(await page.evaluate(() => { const e = [...document.querySelectorAll('.sd-art-error')].pop(); return getComputedStyle(e.nextElementSibling).display !== 'none'; }), true);
+    // Broken typed output becomes a source-only artifact; raw code stays hidden until opened.
+    await page.evaluate(() => { const a = fx.message(); window.__brokenArtifactSource = fx.block(a, 'sds-genui', 'id: broken\nkind: ui\ntitle: Broken\n---\n{not json').closest('.md-code-block'); fx.para(a, 'x'); });
+    const fallback = page.locator('.sd-art[data-kind="code"]').filter({ hasText: 'Broken' }).last();
+    await fallback.waitFor({ timeout: 4000 });
+    const hidden = await page.evaluate(() => {
+      const source = window.__brokenArtifactSource;
+      return !!source && getComputedStyle(source).display === 'none';
+    });
+    assert.equal(hidden, true, 'raw code stays hidden behind the source-only artifact');
+    assert.match(await fallback.locator('.sd-art-sub').textContent() || '', /Source only/);
+    await fallback.click();
+    await page.locator('#sd-viewer .sd-code').waitFor({ timeout: 4000 });
+    assert.match(await page.locator('#sd-viewer .sd-code').textContent() || '', /\{not json/);
     await shot(page, '00-claim.png');
     assert.deepEqual(errors, []);
     await ctx.close();
@@ -257,6 +262,138 @@ try {
     await ctx.close();
   });
 
+  await test('02d renderer failure becomes a source-only downloadable artifact', async () => {
+    const { ctx, page, errors } = await fresh();
+    await page.evaluate(() => {
+      delete window.__sdGenUI;
+      const md = fx.message();
+      fx.classic(md, 'sds-genui', JSON.stringify({ version: 1, id: 'fallback-widget', kind: 'ui', title: 'Fallback Widget', payload: { spec: { version: 1, components: [] } } }));
+    });
+    const card = page.locator('.sd-art[data-kind="code"]');
+    await card.waitFor({ timeout: 5000 });
+    assert.match(await card.locator('.sd-art-title').textContent() || '', /Fallback Widget/);
+    assert.match(await card.locator('.sd-art-sub').textContent() || '', /source only/i);
+    assert.equal(await page.locator('.sd-art-error').count(), 0);
+    await card.click();
+    await page.locator('#sd-viewer .sd-code').waitFor({ timeout: 5000 });
+    assert.match(await page.locator('#sd-viewer .sd-code').textContent() || '', /components/);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
+
+  await test('02e malformed typed output remains downloadable as source instead of only an error card', async () => {
+    const { ctx, page, errors } = await fresh();
+    await page.evaluate(() => {
+      const md = fx.message();
+      fx.block(md, 'sds-genui', 'id: broken-widget\nkind: ui\ntitle: Broken Widget\n---\n{not valid JSON');
+      fx.para(md, 'done');
+    });
+    const card = page.locator('.sd-art[data-kind="code"]');
+    await card.waitFor({ timeout: 7000 });
+    assert.match(await card.locator('.sd-art-title').textContent() || '', /Broken Widget/);
+    assert.match(await card.locator('.sd-art-sub').textContent() || '', /source only/i);
+    assert.equal(await page.locator('.sd-art-error').count(), 0);
+    await card.click();
+    await page.locator('#sd-viewer .sd-code').waitFor({ timeout: 5000 });
+    assert.match(await page.locator('#sd-viewer .sd-code').textContent() || '', /not valid JSON/);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
+
+  await test('02f id-less malformed blocks get isolated source-only artifacts', async () => {
+    const { ctx, page, errors } = await fresh();
+    await page.evaluate(() => {
+      const md = fx.message();
+      fx.block(md, 'sds-genui', 'kind: ui\ntitle: First Broken Spec\n---\n{first: invalid');
+      fx.para(md, 'between');
+      fx.block(md, 'sds-genui', 'kind: ui\ntitle: Second Broken Spec\n---\n{second: invalid');
+      fx.para(md, 'done');
+    });
+    const first = page.locator('.sd-art[data-kind="code"]').filter({ hasText: 'First Broken Spec' });
+    const second = page.locator('.sd-art[data-kind="code"]').filter({ hasText: 'Second Broken Spec' });
+    await first.waitFor(); await second.waitFor();
+    assert.equal(await page.locator('.sd-art[data-kind="code"]').count(), 2);
+    const keys = await page.evaluate(() => window.__sdGenUIViewer.store.list().filter(r => r.kind === 'code').map(r => r.key));
+    assert.equal(new Set(keys).size, 2, 'source-only records must not collide');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
+
+  await test('02g source fallback does not overwrite a prior working artifact version', async () => {
+    const { ctx, page, errors } = await fresh();
+    await page.evaluate(() => {
+      const md = fx.message();
+      fx.block(md, 'sds-genui', 'id: stable-app\nkind: html-app\ntitle: Working App\n---\n<!doctype html><html><head><title>Working</title></head><body><h1>Working app</h1></body></html>');
+      fx.para(md, 'next');
+      fx.block(md, 'sds-genui', 'id: stable-app\nkind: ui\ntitle: Broken Revision\n---\n{not valid JSON');
+      fx.para(md, 'done');
+    });
+    await page.locator('.sd-art[data-kind="html-app"]').filter({ hasText: 'Working App' }).waitFor();
+    await page.locator('.sd-art[data-kind="code"]').filter({ hasText: 'Broken Revision' }).waitFor();
+    const recs = await page.evaluate(() => window.__sdGenUIViewer.store.list().map(r => ({ key: r.key, kind: r.kind, title: r.title, versions: r.versions.length })));
+    assert.ok(recs.some(r => r.kind === 'html-app' && r.title === 'Working App' && r.key.endsWith(':stable-app')), JSON.stringify(recs));
+    assert.ok(recs.some(r => r.kind === 'code' && r.title === 'Broken Revision' && r.key.includes(':stable-app-source-')), JSON.stringify(recs));
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
+
+  await test('02h uppercase streaming ID moves from transient viewer to source-only fallback', async () => {
+    const { ctx, page, errors } = await fresh();
+    await page.evaluate(() => {
+      const md = fx.message();
+      window.__streamBadMd = md;
+      fx.block(md, 'sds-genui', 'id: My-Widget\nkind: svg\ntitle: Streaming broken SVG\n---\n');
+    });
+    const busy = page.locator('.sd-art.sd-art-busy');
+    await busy.waitFor({ timeout: 4000 });
+    await busy.click();
+    await page.locator('#sd-viewer .sd-code').waitFor({ timeout: 4000 });
+    await page.evaluate(() => fx.para(window.__streamBadMd, 'seal malformed block'));
+    const card = page.locator('.sd-art[data-kind="code"]').filter({ hasText: 'Streaming broken SVG' });
+    await card.waitFor({ timeout: 7000 });
+    await page.locator('#sd-viewer .sd-code').waitFor({ timeout: 5000 });
+    assert.match(await page.locator('#sd-viewer .sd-code').textContent() || '', /Streaming broken SVG/);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
+
+  await test('02i preview circuit resets when Generative UI is toggled off and on', async () => {
+    const { ctx, page, errors } = await fresh();
+    await page.evaluate(() => {
+      const md = fx.message();
+      window.__failedPreviewMd = md;
+      window.__savedGenUIForReset = window.__sdGenUI;
+      delete window.__sdGenUI;
+      for (let i = 0; i < 5; i++) {
+        fx.classic(md, 'sds-genui', JSON.stringify({
+          version: 1, id: 'breaker-' + i, kind: 'ui', title: 'Broken Preview ' + i,
+          payload: { spec: { version: 1, components: [] } }
+        }));
+      }
+      fx.para(md, 'finish broken preview batch');
+    });
+    await page.locator('.sd-art[data-kind="code"]').nth(4).waitFor({ timeout: 7000 });
+    await page.evaluate(() => {
+      const P = window.__sdGenUIPrompt;
+      P.setConfig({ enabled: false });
+      // Keep the deliberately broken historical fixtures from immediately
+      // re-tripping the circuit when the feature is re-enabled.
+      if (window.__failedPreviewMd) window.__failedPreviewMd.remove();
+      window.__sdGenUI = window.__savedGenUIForReset;
+      P.setConfig({ enabled: true });
+      const md = fx.message();
+      fx.classic(md, 'sds-genui', JSON.stringify({
+        version: 1, id: 'after-reset', kind: 'html-app', title: 'After Reset',
+        payload: { html: '<!doctype html><html><head><title>After Reset</title></head><body><h1>Ready</h1></body></html>' }
+      }));
+      fx.para(md, 'finish after reset');
+    });
+    await page.locator('.sd-art[data-kind="html-app"]').filter({ hasText: 'After Reset' }).waitFor({ timeout: 7000 });
+    assert.equal(await page.locator('.sd-art[data-kind="code"]').filter({ hasText: 'After Reset' }).count(), 0, 're-enabled GenUI should render a valid artifact normally');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
+
   await test('03 streaming: card shows "Generating…", viewer streams code, then exactly one card and live preview', async () => {
     const { ctx, page, errors } = await fresh();
     await page.evaluate(() => { window.__md = fx.message(); window.__pre = fx.block(window.__md, 'sds-genui', ''); });
@@ -282,20 +419,22 @@ try {
     await ctx.close();
   });
 
-  await test('04 malformed block → quiet error card (raw code hidden behind a toggle); unknown kinds are inferred; later blocks still render', async () => {
+  await test('04 malformed block → source-only card; unknown kinds are inferred; later blocks still render', async () => {
     const { ctx, page, errors } = await fresh();
     await page.evaluate(() => {
       const md = fx.message();
-      fx.block(md, 'sds-genui', 'id: broken\nkind: ui\n---\n{"components": [oops');
+      fx.block(md, 'sds-genui', 'id: broken\nkind: ui\ntitle: Broken UI\n---\n{"components": [oops');
       fx.para(md, 'between');
       fx.block(md, 'sds-genui', 'id: rocket\nkind: rocket-ship\ntitle: Rocket\n---\n<div><p>x</p></div>');
       fx.para(md, 'mid');
       fx.block(md, 'sds-genui', 'id: ok-svg\nkind: svg\ntitle: Fine\n---\n<svg viewBox="0 0 4 4"><rect width="4" height="4"/></svg>');
       fx.para(md, 'after');
     });
-    await page.locator('.sd-art-error').waitFor();
+    const source = page.locator('.sd-art[data-kind="code"]').filter({ hasText: 'Broken UI' });
+    await source.waitFor();
+    assert.match(await source.locator('.sd-art-sub').textContent() || '', /source only/i);
+    assert.equal(await page.locator('.sd-art-error').count(), 0);
     assert.equal(await page.locator('.md-code-block').first().isVisible(), false, 'raw code never shown by default');
-    assert.match(await page.locator('.sd-art-error').textContent(), /Couldn.t display/);
     await page.locator('.sd-art', { hasText: 'Rocket' }).waitFor();
     await page.locator('.sd-art[data-kind="svg"]').waitFor();
     assert.deepEqual(errors, []);
@@ -431,8 +570,14 @@ try {
     // Declared mcp-app block mounts the same host; unsafe references are refused.
     await page.evaluate(() => { const md = fx.message(); fx.block(md, 'sds-genui', 'id: weather-home\nkind: mcp-app\ntitle: Weather\nserver: https://mcp.example.com/mcp\nresource: ui://weather/app.html'); fx.para(md, 'x'); });
     await page.locator('.sd-inline[data-kind="mcp-app"] .sd-mcp').waitFor();
-    await page.evaluate(() => { const md = fx.message(); fx.block(md, 'sds-genui', 'id: bad\nkind: mcp-app\nserver: http://127.0.0.1/mcp\nresource: javascript:alert(1)'); fx.para(md, 'x'); });
-    await page.locator('.sd-art-error').waitFor();
+    await page.evaluate(() => { const md = fx.message(); fx.block(md, 'sds-genui', 'id: bad\nkind: mcp-app\ntitle: Unsafe Resource\nserver: http://127.0.0.1/mcp\nresource: javascript:alert(1)'); fx.para(md, 'x'); });
+    const unsafe = page.locator('.sd-art[data-kind="code"]').filter({ hasText: 'Unsafe Resource' });
+    await unsafe.waitFor();
+    assert.match(await unsafe.locator('.sd-art-sub').textContent() || '', /source only/i);
+    assert.equal(await page.locator('.sd-art-error').count(), 0, 'unsafe URI stays source-only and is not mounted');
+    await unsafe.click();
+    await page.locator('#sd-viewer .sd-code').waitFor();
+    assert.match(await page.locator('#sd-viewer .sd-code').textContent() || '', /javascript:alert/);
     assert.deepEqual(errors, []);
     await ctx.close();
   });

@@ -147,6 +147,57 @@ test('viewer: describe/sourceOf/frameKind cover every artifact kind', () => {
   assert.match(V.sourceOf({ kind: 'html-app', payload: { html: '<p>x</p>', css: 'p{}', js: 'go()' } }), /<style>\s*p\{\}\s*<\/style>[\s\S]*<p>x<\/p>[\s\S]*go\(\)/);
   assert.equal(V.sourceOf({ kind: 'svg', payload: { svg: '<svg/>' } }), '<svg/>');
   assert.equal(V.sourceOf({ kind: 'react', payload: { source: 'export default 1' } }), 'export default 1');
+  for (const [language, ext] of [['csv', 'csv'], ['tsv', 'tsv'], ['jsonl', 'jsonl'], ['toml', 'toml'], ['graphql', 'graphql'], ['ipynb', 'ipynb'], ['dockerfile', 'dockerfile'], ['makefile', 'makefile']]) assert.equal(V.describe('code', { language }).ext, ext, language);
+  assert.equal(V.fileName('report.csv', 'csv'), 'report.csv');
+  assert.equal(V.fileName('README.md', 'md'), 'README.md');
+  assert.equal(V.fileName('notes.markdown', 'md'), 'notes.markdown');
+  assert.equal(V.fileName('my.data.csv', 'csv'), 'my.data.csv');
+  assert.equal(V.fileName('MY.DATA.CSV', 'csv'), 'MY.DATA.CSV');
+  assert.equal(V.fileName('Quarterly Report', 'csv'), 'Quarterly Report.csv');
+  assert.equal(V.fileName('config.pdf', 'md'), 'config.md');
+  assert.equal(V.fileName('Node.js', 'js'), 'Node.js');
+  assert.equal(V.fileName('../report.csv', 'csv'), 'report.csv');
+  assert.equal(V.fileName('Dockerfile', 'dockerfile'), 'Dockerfile');
+  assert.equal(V.fileName('.env', 'env'), '.env');
+});
+
+test('protocol: common data/config labels normalize to non-executable code artifacts', () => {
+  const { window } = load(['sd-genui-protocol.js']), P = window.__sdGenUIProtocol;
+  for (const language of ['csv','tsv','jsonl','json5','ini','env','dotenv','properties','conf','config','graphql','gql','proto','protobuf','dockerfile','makefile','ipynb','txt','log','diff','ps1','powershell']) {
+    const r = P.parseBlock('id: output-file\nkind: ' + language + '\ntitle: output.' + language + '\n---\nvalue = 1');
+    assert.equal(r.ok, true, language + ': ' + r.error);
+    assert.equal(r.block.kind, 'code', language);
+    assert.equal(r.block.payload.language, language);
+  }
+});
+
+test('prompt: explicit file requests select artifact guidance in auto mode (English + Bengali)', () => {
+  const { window } = load(['sd-genui-prompt.js']), P = window.__sdGenUIPrompt;
+  P.resetConfig();
+  for (const request of ['Create a file named config.yaml','Generate a CSV spreadsheet with example rows','Write a Python script and save it as cleanup.py','একটি README.md ফাইল তৈরি করো']) {
+    P._resetTurns();
+    assert.equal(P.shouldInject(request, {}, P.getConfig()), true, request);
+    const prompt = P.build(request);
+    assert.match(prompt, /sds-genui — artifacts/);
+    assert.match(prompt, /File-first contract/);
+    assert.ok(P.selectModules(request, P.getConfig(), {}).includes('apps'));
+  }
+  for (const request of ['Save the query as schema.graphql', 'Export this schema as service.proto']) {
+    P._resetTurns();
+    assert.equal(P.shouldInject(request, {}, P.getConfig()), true, request + ' should recognize a filename-based request');
+  }
+  P._resetTurns();
+  const nodePrompt = P.build('How does Node.js work?', { chat: 'node' });
+  assert.doesNotMatch(nodePrompt, /sds-genui — artifacts/, 'a framework-name mention must not select the artifact module');
+  assert.equal(P.selectModules('How does Node.js work?', P.getConfig(), {}).includes('apps'), false);
+  for (const request of ['Make this text more formal', 'write a python function', 'কোড লিখে দাও']) {
+    P._resetTurns();
+    assert.equal(P.shouldInject(request, {}, P.getConfig()), false, request + ' must not force artifact guidance');
+  }
+  P.setConfig({ frequency: 'every_n', interval: 4 }); P._resetTurns();
+  P.build('hi', { chat: 'every' });
+  assert.equal(P.build('Please save the query as schema.graphql', { chat: 'every' }).includes('File-first contract'), true);
+  P.resetConfig();
 });
 
 test('mcp: uiOf follows the 2026-01-26 MCP Apps spec (nested + deprecated flat key, ui:// only)', () => {
