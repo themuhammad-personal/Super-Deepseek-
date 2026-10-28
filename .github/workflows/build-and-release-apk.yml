@@ -428,6 +428,16 @@ jobs:
             printf 'tag=latest\n' >> "$GITHUB_OUTPUT"
             printf 'title=Super DeepSeek (Continuous Build #%s)\n' "$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
           fi
+      - name: Package source archive for the exact release commit
+        env:
+          RELEASE_VERSION: ${{ steps.rel_cfg.outputs.version }}
+        run: |
+          set -euo pipefail
+          SOURCE_ARCHIVE="super-deepseek-source-v${RELEASE_VERSION}-build${GITHUB_RUN_NUMBER}.zip"
+          git archive --format=zip --prefix="Super-DeepSeek-${RELEASE_VERSION}-build${GITHUB_RUN_NUMBER}/" "$GITHUB_SHA" > "$SOURCE_ARCHIVE"
+          test -s "$SOURCE_ARCHIVE"
+          sha256sum "$SOURCE_ARCHIVE" > "$SOURCE_ARCHIVE.sha256"
+          echo "Source archive generated from exact release commit $GITHUB_SHA."
       - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.rel_cfg.outputs.tag }}
@@ -438,6 +448,7 @@ jobs:
             **Version:** `${{ steps.rel_cfg.outputs.version }}`
             **Build:** `${{ github.run_number }}`
             **Commit:** `${{ github.sha }}`
+            **Exact source bundle:** `super-deepseek-source-v${{ steps.rel_cfg.outputs.version }}-build${{ github.run_number }}.zip` (matching commit; SHA-256 file included)
 
             The official DeepSeek chat, supercharged: the Super DeepSeek engine runs on
             top of chat.deepseek.com inside a native Android shell.
@@ -463,6 +474,8 @@ jobs:
           files: |
             *.apk
             *.sha256
+            super-deepseek-source-v*.zip
+            super-deepseek-source-v*.zip.sha256
           prerelease: false
           make_latest: true
         env:
