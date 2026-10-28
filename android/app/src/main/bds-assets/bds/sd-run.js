@@ -420,7 +420,8 @@
   function protocolText(root) {
     var entries = [];
     collectTextEntries(root, entries, null);
-    return entries.length ? entries.map(function (e) { return e.node.nodeValue || ''; }).join('') : String(root && root.textContent || '');
+    // Empty means only excluded code/examples; never classify those through textContent.
+    return entries.map(function (e) { return e.node.nodeValue || ''; }).join('');
   }
 
   function visibleText(el) {
