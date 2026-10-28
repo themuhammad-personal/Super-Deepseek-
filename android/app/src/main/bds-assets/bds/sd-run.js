@@ -405,7 +405,12 @@
     var tag = String(root.tagName || '').toUpperCase();
     if (tag === 'PRE' || tag === 'CODE' || tag === 'SCRIPT' || tag === 'STYLE') return;
     if (root.id === 'sd-run-sheet' ||
-        (root.classList && root.classList.contains('sd-run-card'))) return;
+        (root.classList && (
+          root.classList.contains('sd-run-card') ||
+          root.classList.contains('bds-mcp-loading') ||
+          root.classList.contains('bds-mcp-result-card') ||
+          root.classList.contains('bds-mcp-error-card')
+        ))) return;
     var hidden = root.hasAttribute && root.hasAttribute('data-sd-run-raw-hidden') ? root : hiddenParent;
     var children = root.childNodes;
     if (!children || !children.length) return;
