@@ -133,14 +133,19 @@ test('raw call spans support name= and preserve prose around a call', () => {
         this.childNodes[i] = next; next.parentNode = this; old.parentNode = null; return old;
       },
       insertBefore(next, ref) {
-        // Match DOM semantics: moving a node detaches it from its old parent.
-        if (next.parentNode && Array.isArray(next.parentNode.childNodes)) {
-          const oldIndex = next.parentNode.childNodes.indexOf(next);
-          if (oldIndex >= 0) next.parentNode.childNodes.splice(oldIndex, 1);
-        }
+        // Browser DOM validates the destination before mutating either tree.
+        if (next === ref) return next;
         const i = this.childNodes.indexOf(ref);
         if (i < 0) throw new Error('reference child not found');
-        this.childNodes.splice(i, 0, next); next.parentNode = this; return next;
+        const oldParent = next.parentNode;
+        if (oldParent && Array.isArray(oldParent.childNodes)) {
+          const oldIndex = oldParent.childNodes.indexOf(next);
+          if (oldIndex >= 0) oldParent.childNodes.splice(oldIndex, 1);
+        }
+        const destinationIndex = this.childNodes.indexOf(ref);
+        this.childNodes.splice(destinationIndex, 0, next);
+        next.parentNode = this;
+        return next;
       },
       removeChild(child) {
         const i = this.childNodes.indexOf(child);
@@ -163,6 +168,21 @@ test('raw call spans support name= and preserve prose around a call', () => {
   const host = el('DIV', [before, first, second, after, example]);
   host.querySelectorAll = () => [];
   win.document.createElement = (tag) => el(tag.toUpperCase());
+
+  // Fake insertBefore should not mutate the DOM when validation fails or when
+  // a node is inserted immediately before itself.
+  const destination = el('DIV', [text('keep'), text('ref')]);
+  const movingParent = el('DIV', [text('move')]);
+  const moving = movingParent.firstChild;
+  const invalidRef = el('P', [text('not a destination child')]);
+  const beforeInvalid = movingParent.textContent;
+  assert.throws(() => destination.insertBefore(moving, invalidRef), /reference child not found/);
+  assert.equal(movingParent.textContent, beforeInvalid);
+  assert.equal(movingParent.firstChild, moving);
+  const firstDestinationNode = destination.firstChild;
+  assert.equal(destination.insertBefore(firstDestinationNode, firstDestinationNode), firstDestinationNode);
+  assert.equal(destination.firstChild, firstDestinationNode);
+  assert.equal(destination.textContent, 'keepref');
   assert.equal(run._protocolText(host), 'Before.  <SDS:AUTO:MCP url="sandbox" name="run">{"command":"ls"}</SDS:AUTO:MCP> After.');
   assert.equal(run._protocolText(el('DIV', [example])), '', 'fenced code-only examples are excluded from protocol detection');
   const hidden = new Set();
