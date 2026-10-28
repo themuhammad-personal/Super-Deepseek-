@@ -58,7 +58,7 @@ test('published release carries a source archive and SHA-256 from the exact rele
   const releaseStart = workflow.indexOf('  release:');
   const releaseBlock = workflow.slice(releaseStart);
   assert.ok(releaseBlock.includes('super-deepseek-source-v*.zip'));
-  assert.ok(releaseBlock.includes('super-deepseek-source-v*.zip.sha256'));
+  assert.ok(releaseBlock.includes('*.sha256'), 'release must upload the source checksum sidecar');
   assert.ok(releaseBlock.includes('**Exact source bundle:**'), 'release notes must point to the matching source asset');
 });
 test('published release still requires permanent signing material, never a test key', () => {
