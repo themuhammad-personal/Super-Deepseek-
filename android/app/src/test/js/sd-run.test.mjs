@@ -133,10 +133,10 @@ test('raw call spans support name= and preserve prose around a call', () => {
         this.childNodes[i] = next; next.parentNode = this; old.parentNode = null; return old;
       },
       insertBefore(next, ref) {
-        // Browser DOM validates the destination before mutating either tree.
-        if (next === ref) return next;
+        // Validate the reference before any no-op or node move, as the DOM does.
         const i = this.childNodes.indexOf(ref);
         if (i < 0) throw new Error('reference child not found');
+        if (next === ref) return next;
         const oldParent = next.parentNode;
         if (oldParent && Array.isArray(oldParent.childNodes)) {
           const oldIndex = oldParent.childNodes.indexOf(next);
@@ -179,6 +179,7 @@ test('raw call spans support name= and preserve prose around a call', () => {
   assert.throws(() => destination.insertBefore(moving, invalidRef), /reference child not found/);
   assert.equal(movingParent.textContent, beforeInvalid);
   assert.equal(movingParent.firstChild, moving);
+  assert.throws(() => destination.insertBefore(invalidRef, invalidRef), /reference child not found/);
   const firstDestinationNode = destination.firstChild;
   assert.equal(destination.insertBefore(firstDestinationNode, firstDestinationNode), firstDestinationNode);
   assert.equal(destination.firstChild, firstDestinationNode);
