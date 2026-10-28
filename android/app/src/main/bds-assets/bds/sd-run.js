@@ -141,7 +141,7 @@
 
   function isProtocolResultText(text) {
     var tx = String(text || '').trim();
-    return /^<SuperDeepSeek>\s*[\s\S]*?\[SDS:AUTO_MCP_(RESULT|ERROR)\][\s\S]*?\[\/SDS:AUTO_MCP_\1\]\s*<\/SuperDeepSeek>$/i.test(tx);
+    return /^<(?:SuperDeepSeek|BetterDeepSeek)>\s*[\s\S]*?\[(?:SDS|BDS):AUTO_MCP_(RESULT|ERROR)\][\s\S]*?\[\/(?:SDS|BDS):AUTO_MCP_\1\]\s*<\/(?:SuperDeepSeek|BetterDeepSeek)>$/i.test(tx);
   }
 
   function isAutoUserText(text, role) {
