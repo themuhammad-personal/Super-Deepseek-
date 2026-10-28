@@ -55,13 +55,18 @@ test('published release still requires permanent signing material, never a test 
 
 test('trusted publishing refs protect the permanent signer and treat tags as data', () => {
   const trustedPublishCondition = "if: (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) || (github.event_name == 'workflow_dispatch' && inputs.publish == true && github.ref == 'refs/heads/main')";
-  assert.equal(workflow.split(trustedPublishCondition).length - 1, 3,
-    'permanent signing, APK gate, and release publishing must share trusted-event/ref rules');
+  const permanentKey = workflow.match(/- name: Prepare permanent release signing key([\\s\\S]*?)(?=\\n      - name: Prepare temporary signing key)/)?.[1];
+  assert.ok(permanentKey?.includes(trustedPublishCondition),
+    'permanent signing must independently enforce the trusted-event/ref condition');
+  const apkGate = workflow.match(/- name: Gate publishable APK identity, checksum, signature, and sandbox([\\s\\S]*?)(?=\\n      - name: Upload APK Artifact)/)?.[1];
+  assert.ok(apkGate?.includes(trustedPublishCondition),
+    'the publishable APK gate must independently enforce the trusted-event/ref condition');
+  const releaseJob = workflow.match(/\\n  release:([\\s\\S]*)$/)?.[1];
+  assert.ok(releaseJob?.includes(trustedPublishCondition),
+    'the release job itself must block PR and untrusted-ref publication');
 
   assert.match(workflow, /^permissions:\s*\n  contents: read$/m,
     'build and test jobs must receive only read access to repository contents');
-  const releaseJob = workflow.match(/\n  release:([\s\S]*)$/)?.[1];
-  assert.ok(releaseJob, 'release job must exist');
   assert.match(releaseJob, /permissions:\s*\n      contents: write/,
     'write access must be scoped to the release-publishing job');
   const historyGuard = workflow.match(/- name: Verify release commit is on trusted main history([\s\S]*?)(?=\n      - name: Prepare permanent release signing key)/)?.[1];
