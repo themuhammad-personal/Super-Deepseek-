@@ -72,16 +72,19 @@ test('GitHub-generated source archives track the latest tag without duplicate so
     'stale main commits must be skipped before they can update the release');
 
   const sync = releaseBlock.slice(syncStart);
-  assert.ok(sync.includes('if: github.ref == \'refs/heads/main\''));
+  assert.ok(sync.includes("if: steps.rel_cfg.outputs.tag == 'latest' && steps.release_freshness.outputs.current == 'true'"));
   assert.ok(sync.includes('git/refs/tags/latest'));
   assert.ok(sync.includes('-f sha="$GITHUB_SHA"') && sync.includes('-F force=true'),
     'latest tag must be force-updated to the tested release commit');
   assert.ok(sync.includes('git/ref/tags/latest') && sync.includes('tag_sha" != "$GITHUB_SHA"'),
     'the updated tag must be verified against the release commit');
+  assert.ok(sync.includes('repos/${GITHUB_REPOSITORY}/releases') &&
+    sync.includes('.tag_name == "latest" or (.tag_name | startswith("v"))'),
+    'cleanup must include latest and historical version-tagged releases');
   assert.ok(sync.includes('super-deepseek-source-v[^/]+\\\\.zip'),
     'cleanup must only target the old named source ZIP and its checksum');
-  assert.ok(sync.includes('--method DELETE'),
-    'obsolete duplicate source assets must be removed from the existing release');
+  assert.ok(sync.includes('--method DELETE') && sync.includes('delete_failed=true'),
+    'cleanup must continue attempting other stale assets even if a deletion fails');
 });
 test('published release still requires permanent signing material, never a test key', () => {
   assert.match(workflow, /Prepare permanent release signing key[\s\S]*?BDS_KEYSTORE: \$\{\{ secrets\.BDS_KEYSTORE \}\}/);
