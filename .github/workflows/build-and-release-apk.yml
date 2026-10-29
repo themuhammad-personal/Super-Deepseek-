@@ -428,16 +428,6 @@ jobs:
             printf 'tag=latest\n' >> "$GITHUB_OUTPUT"
             printf 'title=Super DeepSeek (Continuous Build #%s)\n' "$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
           fi
-      - name: Package source archive for the exact release commit
-        env:
-          RELEASE_VERSION: ${{ steps.rel_cfg.outputs.version }}
-        run: |
-          set -euo pipefail
-          SOURCE_ARCHIVE="super-deepseek-source-v${RELEASE_VERSION}-build${GITHUB_RUN_NUMBER}.zip"
-          git archive --format=zip --prefix="Super-DeepSeek-${RELEASE_VERSION}-build${GITHUB_RUN_NUMBER}/" "$GITHUB_SHA" > "$SOURCE_ARCHIVE"
-          test -s "$SOURCE_ARCHIVE"
-          sha256sum "$SOURCE_ARCHIVE" > "$SOURCE_ARCHIVE.sha256"
-          echo "Source archive generated from exact release commit $GITHUB_SHA."
       - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.rel_cfg.outputs.tag }}
@@ -448,7 +438,7 @@ jobs:
             **Version:** `${{ steps.rel_cfg.outputs.version }}`
             **Build:** `${{ github.run_number }}`
             **Commit:** `${{ github.sha }}`
-            **Exact source bundle:** `super-deepseek-source-v${{ steps.rel_cfg.outputs.version }}-build${{ github.run_number }}.zip` (matching commit; SHA-256 file included)
+            **Source code:** The automatically generated GitHub `Source code (zip)` and `Source code (tar.gz)` links below match this release commit.
 
             The official DeepSeek chat, supercharged: the Super DeepSeek engine runs on
             top of chat.deepseek.com inside a native Android shell.
@@ -474,8 +464,40 @@ jobs:
           files: |
             *.apk
             *.sha256
-            super-deepseek-source-v*.zip
           prerelease: false
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Sync latest tag with release commit and remove redundant source archives
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # GitHub's built-in Source code ZIP/TAR archives are generated from the tag.
+          # Advance latest only after the APK release assets and notes have been published.
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/latest" \
+            -f sha="$GITHUB_SHA" \
+            -F force=true >/dev/null
+
+          tag_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/latest" --jq '.object.sha')"
+          if [[ "$tag_sha" != "$GITHUB_SHA" ]]; then
+            echo "::error::latest tag points to ${tag_sha}, expected ${GITHUB_SHA}"
+            exit 1
+          fi
+
+          # Remove the duplicate ZIP/checksum assets from older releases; keep
+          # GitHub's standard Source code (zip) and Source code (tar.gz) links.
+          release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/latest" --jq '.id')"
+          stale_assets="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" \
+            --jq '.[] | select(.name | test("^super-deepseek-source-v[^/]+\\.zip(\\.sha256)?$")) | [.id, .name] | @tsv')"
+          if [[ -n "$stale_assets" ]]; then
+            while IFS=\t' read -r asset_id asset_name; do
+              [[ -n "$asset_id" ]] || continue
+              gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" >/dev/null
+              echo "Removed redundant source asset: ${asset_name}"
+            done <<< "$stale_assets"
+          fi
+
+          echo "Verified latest tag $tag_sha matches release commit $GITHUB_SHA."
