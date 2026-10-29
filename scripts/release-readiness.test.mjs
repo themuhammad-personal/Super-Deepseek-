@@ -47,19 +47,33 @@ test('publishable APK gate verifies manifest, versionCode, checksum, signer, and
   assert.ok(match[0].includes('inputs.publish == true') && match[0].includes('refs/heads/main'));
 });
 
-test('published release carries a source archive and SHA-256 from the exact release commit', () => {
-  const sourceStart = workflow.indexOf('- name: Package source archive for the exact release commit');
-  const actionStart = workflow.indexOf('- uses: softprops/action-gh-release@v3', sourceStart);
-  assert.ok(sourceStart >= 0 && actionStart > sourceStart, 'release source archive step must run before publication');
-  const sourceStep = workflow.slice(sourceStart, actionStart);
-  assert.ok(sourceStep.includes('git archive --format=zip'));
-  assert.ok(sourceStep.includes('"$GITHUB_SHA"'), 'source archive must match the commit tested and built by this workflow');
-  assert.ok(sourceStep.includes('sha256sum "$SOURCE_ARCHIVE"'), 'source archive must include a SHA-256 sidecar');
+test('GitHub-generated source archives track the latest tag without duplicate source bundles', () => {
   const releaseStart = workflow.indexOf('  release:');
   const releaseBlock = workflow.slice(releaseStart);
-  assert.ok(releaseBlock.includes('super-deepseek-source-v*.zip'));
-  assert.ok(releaseBlock.includes('*.sha256'), 'release must upload the source checksum sidecar');
-  assert.ok(releaseBlock.includes('**Exact source bundle:**'), 'release notes must point to the matching source asset');
+  const actionStart = releaseBlock.indexOf('- uses: softprops/action-gh-release@v3');
+  const syncStart = releaseBlock.indexOf('- name: Sync latest tag with release commit and remove redundant source archives');
+  assert.ok(releaseStart >= 0 && actionStart >= 0 && syncStart > actionStart,
+    'tag sync and legacy-asset cleanup must run after the release assets are published');
+
+  const releaseConfig = releaseBlock.slice(actionStart, syncStart);
+  assert.ok(releaseConfig.includes('Source code (zip)') && releaseConfig.includes('Source code (tar.gz)'),
+    'release notes must direct users to the automatic GitHub source archives');
+  assert.doesNotMatch(releaseConfig, /super-deepseek-source-v.*\\.zip/,
+    'the release must not upload a duplicate standalone source ZIP');
+  assert.doesNotMatch(workflow, /Package source archive for the exact release commit/,
+    'the standalone source packaging step must be removed');
+
+  const sync = releaseBlock.slice(syncStart);
+  assert.ok(sync.includes('if: github.ref == \'refs/heads/main\''));
+  assert.ok(sync.includes('git/refs/tags/latest'));
+  assert.ok(sync.includes('-f sha="$GITHUB_SHA"') && sync.includes('-F force=true'),
+    'latest tag must be force-updated to the tested release commit');
+  assert.ok(sync.includes('git/ref/tags/latest') && sync.includes('tag_sha" != "$GITHUB_SHA"'),
+    'the updated tag must be verified against the release commit');
+  assert.ok(sync.includes('super-deepseek-source-v[^/]+\\\\.zip'),
+    'cleanup must only target the old named source ZIP and its checksum');
+  assert.ok(sync.includes('--method DELETE'),
+    'obsolete duplicate source assets must be removed from the existing release');
 });
 test('published release still requires permanent signing material, never a test key', () => {
   assert.match(workflow, /Prepare permanent release signing key[\s\S]*?BDS_KEYSTORE: \$\{\{ secrets\.BDS_KEYSTORE \}\}/);
