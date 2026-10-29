@@ -58,7 +58,7 @@ test('GitHub-generated source archives track the latest tag without duplicate so
   const releaseConfig = releaseBlock.slice(actionStart, syncStart);
   assert.ok(releaseConfig.includes('Source code (zip)') && releaseConfig.includes('Source code (tar.gz)'),
     'release notes must direct users to the automatic GitHub source archives');
-  assert.doesNotMatch(releaseConfig, /super-deepseek-source-v.*\\.zip/,
+  assert.ok(!releaseConfig.includes('super-deepseek-source-v*.zip'),
     'the release must not upload a duplicate standalone source ZIP');
   assert.doesNotMatch(workflow, /Package source archive for the exact release commit/,
     'the standalone source packaging step must be removed');
