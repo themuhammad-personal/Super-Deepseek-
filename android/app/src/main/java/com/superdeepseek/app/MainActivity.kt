@@ -1237,17 +1237,24 @@ class MainActivity : ComponentActivity() {
                     barSampleBusy = false
                     return@topCopy
                 }
-                PixelCopy.request(window, bottomRect, bottom, bottomCopy@{ bottomResult ->
+                try {
+                    PixelCopy.request(window, bottomRect, bottom, bottomCopy@{ bottomResult ->
+                        barSampleBusy = false
+                        if (isFinishing || isDestroyed || bootView != null) return@bottomCopy
+                        val topColor = dominantColor(pixelsOf(top))
+                        val bottomColor = if (bottomResult == PixelCopy.SUCCESS) dominantColor(pixelsOf(bottom)) else null
+                        if (topColor == null && bottomColor == null) return@bottomCopy
+                        val t = topColor ?: pageBarColor
+                        val b = bottomColor ?: t
+                        if (t != pageBarColor || b != pageNavBarColor) applyBarColors(t, b)
+                        rememberDarkPageColor(t)
+                    }, handler)
+                } catch (e: IllegalArgumentException) {
+                    // The window can lose its backing surface after the first copy's
+                    // callback. This asynchronous request is outside the outer try/catch.
                     barSampleBusy = false
-                    if (isFinishing || isDestroyed || bootView != null) return@bottomCopy
-                    val topColor = dominantColor(pixelsOf(top))
-                    val bottomColor = if (bottomResult == PixelCopy.SUCCESS) dominantColor(pixelsOf(bottom)) else null
-                    if (topColor == null && bottomColor == null) return@bottomCopy
-                    val t = topColor ?: pageBarColor
-                    val b = bottomColor ?: t
-                    if (t != pageBarColor || b != pageNavBarColor) applyBarColors(t, b)
-                    rememberDarkPageColor(t)
-                }, handler)
+                    return@topCopy
+                }
             }, handler)
         } catch (e: IllegalArgumentException) {
             // Window not ready for a copy (e.g. no surface yet).
