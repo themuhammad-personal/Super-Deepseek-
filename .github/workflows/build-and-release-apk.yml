@@ -489,7 +489,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Sync latest tag with release commit and remove redundant source archives
-        if: github.ref == 'refs/heads/main' && steps.release_freshness.outputs.current == 'true'
+        if: steps.rel_cfg.outputs.tag == 'latest' && steps.release_freshness.outputs.current == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -509,15 +509,31 @@ jobs:
 
           # Remove the duplicate ZIP/checksum assets from older releases; keep
           # GitHub's standard Source code (zip) and Source code (tar.gz) links.
-          release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/latest" --jq '.id')"
-          stale_assets="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" \
-            --jq '.[] | select(.name | test("^super-deepseek-source-v[^/]+\\.zip(\\.sha256)?$")) | [.id, .name] | @tsv')"
-          if [[ -n "$stale_assets" ]]; then
+          # Remove old standalone source bundles from latest and all version-tagged
+          # releases; GitHub's built-in Source code ZIP/TAR links are kept.
+          releases="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" \
+            --jq '.[] | select(.tag_name == "latest" or (.tag_name | startswith("v"))) | [.id, .tag_name] | @tsv')"
+          delete_failed=false
+          while IFS="$(printf '\t')" read -r release_id release_tag; do
+            [[ -n "$release_id" ]] || continue
+            stale_assets="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" \
+              --jq '.[] | select(.name | test("^super-deepseek-source-v[^/]+\\.zip(\\.sha256)?$")) | [.id, .name] | @tsv')"
+            [[ -n "$stale_assets" ]] || continue
+
             while IFS="$(printf '\t')" read -r asset_id asset_name; do
               [[ -n "$asset_id" ]] || continue
-              gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" >/dev/null
-              echo "Removed redundant source asset: ${asset_name}"
+              if gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" >/dev/null; then
+                echo "Removed redundant source asset from ${release_tag}: ${asset_name}"
+              else
+                echo "::error::Failed to remove redundant source asset from ${release_tag}: ${asset_name}"
+                delete_failed=true
+              fi
             done <<< "$stale_assets"
+          done <<< "$releases"
+
+          if [[ "$delete_failed" == true ]]; then
+            echo "::error::Some redundant source assets could not be removed; review the release log."
+            exit 1
           fi
 
           echo "Verified latest tag $tag_sha matches release commit $GITHUB_SHA."
