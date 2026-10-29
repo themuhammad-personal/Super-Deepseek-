@@ -63,6 +63,14 @@ test('GitHub-generated source archives track the latest tag without duplicate so
   assert.doesNotMatch(workflow, /Package source archive for the exact release commit/,
     'the standalone source packaging step must be removed');
 
+  assert.ok(releaseBlock.includes('group: super-deepseek-release-${{ github.ref }}') &&
+    releaseBlock.includes('cancel-in-progress: false'),
+    'release publishing must be serialized to avoid overlapping latest updates');
+  assert.ok(releaseBlock.includes('Confirm main release is not superseded') &&
+    releaseBlock.includes('commits/main') &&
+    releaseBlock.includes("steps.release_freshness.outputs.current == 'true'"),
+    'stale main commits must be skipped before they can update the release');
+
   const sync = releaseBlock.slice(syncStart);
   assert.ok(sync.includes('if: github.ref == \'refs/heads/main\''));
   assert.ok(sync.includes('git/refs/tags/latest'));
