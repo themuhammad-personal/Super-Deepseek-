@@ -125,8 +125,8 @@ test('trusted publishing refs protect the permanent signer and treat tags as dat
   assert.ok(releaseConfigStart >= 0 && releaseActionStart > releaseConfigStart, 'release configuration step must exist');
   assert.ok(releaseConfig.includes('if [[ "$GITHUB_REF" == refs/tags/v* ]]'),
     'tag checks must use environment data instead of interpolating ref text into shell source');
-  assert.ok(!releaseConfig.includes('github.ref') && !releaseConfig.includes('github.ref_name'),
-    'untrusted ref values must not be interpolated into shell source');
+  assert.ok(!releaseConfig.includes('${{ github.ref') && !releaseConfig.includes('${{ github.ref_name'),
+    'untrusted ref values must not be interpolated into shell source; workflow-level if conditions are allowed');
 });
 test('README and build notes do not freeze changing Chromium acceptance totals', () => {
   for (const [name, doc] of [['README.md', readme], ['BUILD-NOTES.md', buildNotes]]) {
